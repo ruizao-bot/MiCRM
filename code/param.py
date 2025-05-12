@@ -28,10 +28,6 @@ def modular_uptake(N, M, N_modules, s_ratio):
     for x, y in zip(mC, mR):
         u[np.ix_(x, y)] *= s_ratio
 
-    # Normalize each row
-    for i in range(N):
-        u[i, :] *= 2.5/np.sum(u[i, :])
-
     return u
 
 
