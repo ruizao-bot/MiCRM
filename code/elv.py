@@ -1,3 +1,5 @@
+'''
+
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.integrate import solve_ivp
@@ -272,6 +274,7 @@ plt.ylabel('Intrinsic growth rate $r_i$')
 plt.title('Relationship between $r_i$ and Species CUE')
 plt.grid(True)
 plt.show()
+'''
 ########## New elv with indice selection #########
 import numpy as np
 import matplotlib.pyplot as plt
@@ -281,7 +284,7 @@ import CUE
 
 np.random.seed(37)
 N_pool = 1000  # Species pool size
-M_pool = 20     # Resource pool size
+M_pool = 50     # Resource pool size
 λ = 0.2        # Total leakage rate
 N_modules = 1  # Number of modules
 s_ratio = 1 # Modularity ratio
@@ -297,9 +300,6 @@ omega_pool = np.full(M_pool, 0.1)
 species_indices = np.random.choice(N_pool, N, replace=False)
 resource_indices = np.random.choice(M_pool, M, replace=False)
 u = u_pool[np.ix_(species_indices, resource_indices)]
-
-# Normalize uptake matrix so each species has total uptake = 1
-u = u / u.sum(axis=1, keepdims=True)
 
 l = l_pool[np.ix_(species_indices, resource_indices, resource_indices)]
 lambda_alpha = np.full(M, λ)
@@ -358,8 +358,8 @@ for i in range(N):
 # r_i
 r = np.zeros(N)
 for i in range(N):
-    growth_term = sum(u[i, a] * (1 - lambda_alpha[a]) * R_hat[a] for a in range(M))
-    interaction_term = sum(alpha[i, j] * C_hat[j] for j in range(N))
+    growth_term = sum(u[i, a] * (1 - lambda_alpha[a]) * R0[a] for a in range(M))
+    interaction_term = sum(alpha[i, j] * C0[j] for j in range(N))
     r[i] = growth_term - m[i] - interaction_term
 
 # eLV
@@ -382,7 +382,6 @@ plt.figure()
 plt.scatter(species_CUE, r)
 plt.xlabel('Species CUE')
 plt.ylabel('Intrinsic growth rate $r_i$')
-plt.title('Relationship between $r_i$ and Species CUE')
 plt.grid(True)
 plt.show()
 
@@ -411,13 +410,13 @@ from scipy.integrate import solve_ivp
 import param
 import CUE
 
-# 参数设置
-N = 100
-M = 5
-λ = 0.1
+# Parameter setting
+N = 10
+M = 10
+λ = 0.4
 m = np.full(N, 0.2)
-rho = np.full(M, 0.5)
-omega = np.full(M, 0.1)
+rho = np.full(M, 1)
+omega = np.full(M, 0)
 N_modules = 1
 s_ratio = 1
 
@@ -443,13 +442,13 @@ def dCdt_Rdt(t, y):
     return np.concatenate([dCdt, dRdt])
 
 # 
-C0 = np.full(N, 0.01)
+C0 = np.full(N, 0.1)
 R0 = np.full(M, 1.0)
 Y0 = np.concatenate([C0, R0])
 
 
 t_span = (0, 300)
-t_eval = np.linspace(*t_span, 600)
+t_eval = np.linspace(*t_span, 100)
 sol_mcm = solve_ivp(dCdt_Rdt, t_span, Y0, t_eval=t_eval)
 
 C_hat = sol_mcm.y[:N, -1]

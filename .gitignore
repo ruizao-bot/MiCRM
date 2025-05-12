@@ -3,6 +3,7 @@
 
 # Keep these directories and contents
 !code/
+!code/**
 !code/R/
 !code/R/**
 !results/
