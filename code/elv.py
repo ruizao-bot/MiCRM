@@ -4,6 +4,8 @@ from scipy.integrate import solve_ivp
 from scipy.optimize import root
 import param
 import CUE
+import pandas as pd
+
 # Parameter settings
 np.random.seed(37)
 N_pool = 1000  # Species pool size
@@ -11,10 +13,10 @@ M_pool = 20     # Resource pool size
 λ = 0.2        # Total leakage rate
 N_modules = 5  # Number of modules
 s_ratio = 10.0 # Modularity ratio
-N1 = 10
+N1 = 100
 M1 = 5
-m1 = np.full(N1, 0.3)  # maintaining cost rate
-N2 = 10
+m1 = np.full(N1, 0.2)  # maintaining cost rate
+N2 = 100
 M2 = 5
 m2 = np.full(N2, 0.2)
 # Generate uptake matrix and leakage tensor for the species pool
@@ -22,7 +24,7 @@ u_pool = param.modular_uptake(N_pool, M_pool, N_modules, s_ratio)
 l_pool = param.generate_l_tensor(N_pool, M_pool, N_modules, s_ratio, λ)
 # Set rho and omega for the resource pool
 rho_pool = np.full(M_pool, 0.6)
-omega_pool = np.full(M_pool, 0.1)
+omega_pool = np.full(M_pool, 0)
 # Community 1
 species_indices1 = np.random.choice(N_pool, N1, replace=False)
 resource_indices1 = np.random.choice(M_pool, M1, replace=False)
@@ -231,12 +233,276 @@ R0_list = [R_guess1, R_guess2, R_guess3]
 l_list = [l1, l2, l3]
 m_list = [m1, m2, m3]
 M_list = [M1, M2, M3]
+r_list = [r1, r2, r3]
+
+C_final_list = []
+cue_results = []
 num_communities = len(sol_list) 
 
 for i in range(num_communities):
     C_final = np.array(sol_list[i].y[:, -1]) 
+    C_final_list.append(C_final)
     
     community_CUE, species_CUE = CUE.compute_community_CUE2(
         sol_list[i], N_list[i], u_list[i], R0_list[i], l_list[i], m_list[i]
     )
+    
     print(f"Community {i+1}: CUE = {community_CUE}")
+    
+    for j, cue in enumerate(species_CUE):
+        cue_results.append({
+            "Community": f"Community {i+1}",
+            "Species": f"Species {j+1}",
+            "r": r_list[i][j],
+            "Species CUE": cue
+        })
+community_CUE1, species_CUE1 = CUE.compute_community_CUE2(
+        sol1, N1, u1, R_guess1, l1, m1
+    )
+
+# Convert to DataFrame and save
+# df_species_CUE = pd.DataFrame(cue_results)
+# df_species_CUE.to_csv("../data/df_elv.csv", index=False)
+
+import matplotlib.pyplot as plt
+plt.figure()
+plt.scatter(species_CUE1, r1)
+plt.xlabel('Species CUE')
+plt.ylabel('Intrinsic growth rate $r_i$')
+plt.title('Relationship between $r_i$ and Species CUE')
+plt.grid(True)
+plt.show()
+########## New elv with indice selection #########
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.integrate import solve_ivp
+import param
+import CUE
+
+np.random.seed(37)
+N_pool = 1000  # Species pool size
+M_pool = 20     # Resource pool size
+λ = 0.2        # Total leakage rate
+N_modules = 1  # Number of modules
+s_ratio = 1 # Modularity ratio
+N = 100
+M = 5
+m = np.full(N, 0.2) # maintaining cost rate
+# Generate uptake matrix and leakage tensor for the species pool
+u_pool = param.modular_uptake(N_pool, M_pool, N_modules, s_ratio)
+l_pool = param.generate_l_tensor(N_pool, M_pool, N_modules, s_ratio, λ)
+# Set rho and omega for the resource pool
+rho_pool = np.full(M_pool, 0.6)
+omega_pool = np.full(M_pool, 0.1)
+species_indices = np.random.choice(N_pool, N, replace=False)
+resource_indices = np.random.choice(M_pool, M, replace=False)
+u = u_pool[np.ix_(species_indices, resource_indices)]
+
+# Normalize uptake matrix so each species has total uptake = 1
+u = u / u.sum(axis=1, keepdims=True)
+
+l = l_pool[np.ix_(species_indices, resource_indices, resource_indices)]
+lambda_alpha = np.full(M, λ)
+rho = rho_pool[resource_indices]
+omega = omega_pool[resource_indices]
+def dCdt_Rdt(t, y):
+    C = y[:N]
+    R = y[N:]
+    dCdt = np.zeros(N)
+    dRdt = np.zeros(M)
+
+    for i in range(N):
+        dCdt[i] = sum(C[i] * R[alpha] * u[i, alpha] * (1 - lambda_alpha[alpha]) for alpha in range(M)) - C[i] * m[i]
+
+    for alpha in range(M):
+        dRdt[alpha] = rho[alpha] - R[alpha] * omega[alpha]
+        dRdt[alpha] -= sum(C[i] * R[alpha] * u[i, alpha] for i in range(N))
+        dRdt[alpha] += sum(sum(C[i] * R[beta] * u[i, beta] * l[i, beta, alpha] for beta in range(M)) for i in range(N))
+
+    return np.concatenate([dCdt, dRdt])
+
+# 
+C0 = np.full(N, 0.01)
+R0 = np.full(M, 1.0)
+Y0 = np.concatenate([C0, R0])
+
+
+t_span = (0, 300)
+t_eval = np.linspace(*t_span, 600)
+sol_mcm = solve_ivp(dCdt_Rdt, t_span, Y0, t_eval=t_eval)
+
+C_hat = sol_mcm.y[:N, -1]
+R_hat = sol_mcm.y[N:, -1]
+
+# alpha_ij
+D = np.zeros((M, M))
+for a in range(M):
+    for gamma in range(M):
+        if a == gamma:
+            D[a, a] = omega[a] + sum(C_hat[i] * u[i, a] for i in range(N))
+        else:
+            D[a, gamma] = -sum(C_hat[i] * u[i, gamma] * l[i, gamma, a] for i in range(N))
+
+partial_R_C = np.zeros((M, N))
+for j in range(N):
+    v_j = np.zeros(M)
+    for alpha in range(M):
+        v_j[alpha] = -R_hat[alpha] * u[j, alpha] + sum(R_hat[beta] * u[j, beta] * l[j, beta, alpha] for beta in range(M))
+    partial_R_C[:, j] = np.linalg.solve(D, v_j)
+
+alpha = np.zeros((N, N))
+for i in range(N):
+    for j in range(N):
+        alpha[i, j] = sum(u[i, a] * (1 - lambda_alpha[a]) * partial_R_C[a, j] for a in range(M))
+
+# r_i
+r = np.zeros(N)
+for i in range(N):
+    growth_term = sum(u[i, a] * (1 - lambda_alpha[a]) * R_hat[a] for a in range(M))
+    interaction_term = sum(alpha[i, j] * C_hat[j] for j in range(N))
+    r[i] = growth_term - m[i] - interaction_term
+
+# eLV
+def dCdt_elv(t, C):
+    dCdt = np.zeros(N)
+    for i in range(N):
+        dCdt[i] = C[i] * (r[i] + sum(alpha[i, j] * C[j] for j in range(N)))
+    return dCdt
+
+
+sol_elv = solve_ivp(dCdt_elv, t_span, C0, t_eval=t_eval)
+# CUE
+community_CUE, species_CUE = CUE.compute_community_CUE2(
+        sol_mcm, N, u, R0, l, m
+    )
+
+import matplotlib.pyplot as plt
+
+plt.figure()
+plt.scatter(species_CUE, r)
+plt.xlabel('Species CUE')
+plt.ylabel('Intrinsic growth rate $r_i$')
+plt.title('Relationship between $r_i$ and Species CUE')
+plt.grid(True)
+plt.show()
+
+# u heatmap
+plt.imshow(u, aspect='auto')
+plt.title('Uptake matrix heatmap')
+plt.colorbar()
+plt.show()
+
+# interaction coefficient heatmap
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(6, 5))
+plt.imshow(alpha, aspect='auto', cmap='viridis')
+plt.colorbar(label='α_ij')
+plt.xlabel('j (source species)')
+plt.ylabel('i (focal species)')
+plt.title('Interaction matrix α_ij')
+plt.tight_layout()
+plt.show()
+
+########### New elv no indices selection ################
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.integrate import solve_ivp
+import param
+import CUE
+
+# 参数设置
+N = 100
+M = 5
+λ = 0.1
+m = np.full(N, 0.2)
+rho = np.full(M, 0.5)
+omega = np.full(M, 0.1)
+N_modules = 1
+s_ratio = 1
+
+u = param.modular_uptake(N, M, N_modules, s_ratio)
+l_tensor = param.generate_l_tensor(N, M, N_modules, s_ratio, λ)
+lambda_alpha = np.full(M, λ)
+
+
+def dCdt_Rdt(t, y):
+    C = y[:N]
+    R = y[N:]
+    dCdt = np.zeros(N)
+    dRdt = np.zeros(M)
+
+    for i in range(N):
+        dCdt[i] = sum(C[i] * R[alpha] * u[i, alpha] * (1 - lambda_alpha[alpha]) for alpha in range(M)) - C[i] * m[i]
+
+    for alpha in range(M):
+        dRdt[alpha] = rho[alpha] - R[alpha] * omega[alpha]
+        dRdt[alpha] -= sum(C[i] * R[alpha] * u[i, alpha] for i in range(N))
+        dRdt[alpha] += sum(sum(C[i] * R[beta] * u[i, beta] * l_tensor[i, beta, alpha] for beta in range(M)) for i in range(N))
+
+    return np.concatenate([dCdt, dRdt])
+
+# 
+C0 = np.full(N, 0.01)
+R0 = np.full(M, 1.0)
+Y0 = np.concatenate([C0, R0])
+
+
+t_span = (0, 300)
+t_eval = np.linspace(*t_span, 600)
+sol_mcm = solve_ivp(dCdt_Rdt, t_span, Y0, t_eval=t_eval)
+
+C_hat = sol_mcm.y[:N, -1]
+R_hat = sol_mcm.y[N:, -1]
+
+# alpha_ij
+D = np.zeros((M, M))
+for a in range(M):
+    for gamma in range(M):
+        if a == gamma:
+            D[a, a] = omega[a] + sum(C_hat[i] * u[i, a] for i in range(N))
+        else:
+            D[a, gamma] = -sum(C_hat[i] * u[i, gamma] * l_tensor[i, gamma, a] for i in range(N))
+
+partial_R_C = np.zeros((M, N))
+for j in range(N):
+    v_j = np.zeros(M)
+    for alpha in range(M):
+        v_j[alpha] = -R_hat[alpha] * u[j, alpha] + sum(R_hat[beta] * u[j, beta] * l_tensor[j, beta, alpha] for beta in range(M))
+    partial_R_C[:, j] = np.linalg.solve(D, v_j)
+
+alpha = np.zeros((N, N))
+for i in range(N):
+    for j in range(N):
+        alpha[i, j] = sum(u[i, a] * (1 - lambda_alpha[a]) * partial_R_C[a, j] for a in range(M))
+
+# r_i
+r = np.zeros(N)
+for i in range(N):
+    growth_term = sum(u[i, a] * (1 - lambda_alpha[a]) * R_hat[a] for a in range(M))
+    interaction_term = sum(alpha[i, j] * C_hat[j] for j in range(N))
+    r[i] = growth_term - m[i] - interaction_term
+
+# eLV
+def dCdt_elv(t, C):
+    dCdt = np.zeros(N)
+    for i in range(N):
+        dCdt[i] = C[i] * (r[i] + sum(alpha[i, j] * C[j] for j in range(N)))
+    return dCdt
+
+
+sol_elv = solve_ivp(dCdt_elv, t_span, C0, t_eval=t_eval)
+community_CUE, species_CUE = CUE.compute_community_CUE2(
+        sol_mcm, N, u, R0, l_tensor, m
+    )
+
+
+import matplotlib.pyplot as plt
+
+plt.figure()
+plt.scatter(species_CUE, r)
+plt.xlabel('Species CUE')
+plt.ylabel('Intrinsic growth rate $r_i$')
+plt.title('Relationship between $r_i$ and Species CUE')
+plt.grid(True)
+plt.show()

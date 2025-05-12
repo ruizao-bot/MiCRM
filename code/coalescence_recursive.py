@@ -20,7 +20,7 @@ for seed in seeds:
     N_pool = 1000  # Species pool size
     M_pool = 20     # Resource pool size
     λ = 0.2        # Total leakage rate
-    N_modules = 5  # Number of modules
+    N_modules = 1  # Number of modules
     s_ratio = 10.0 # Modularity ratio
     N1 = 10
     M1 = 5
@@ -90,16 +90,16 @@ for seed in seeds:
     ll = l_pool[np.ix_(species_indices3, resource_indices3, resource_indices3)]
     m3 = np.concatenate([m1, m2])
     lambda_alpha3 = np.full(len(resource_indices3), λ)
-    rho3 = rho_pool[resource_indices3]
+    
     omega3 = omega_pool[resource_indices3]
     N3 = N1 + N2
     M3 = len(resource_indices3)
-
+    rho3 = rho_pool[resource_indices3]
     C0_3 = np.concatenate([sol1.y[:N1, -1], sol2.y[:N2, -1]])
     R0_3 = sol1.y[N1:, -1]  + sol2.y[N2:, -1]
     Y0_3 = np.concatenate([C0_3, R0_3])
 
-    sol3 = solve_ivp(dCdt_Rdt, t_span, np.concatenate([C0_3, R0_3]), t_eval=t_eval, args=(uu, ll, N3, M3, m3, np.full(M3, 0.5), np.full(M3, 0.5)))
+    sol3 = solve_ivp(dCdt_Rdt, t_span, np.concatenate([C0_3, R0_3]), t_eval=t_eval, args=(uu, ll, N3, M3, m3, rho3, omega3))
     sol_list = [sol1, sol2, sol3]
     N_list = [N1, N2, N3]
     # Compute Community CUE for each community
@@ -111,7 +111,12 @@ for seed in seeds:
     C_final1 = sol1.y[:N1, -1] 
     C_final2 = sol2.y[:N2, -1] 
     C_final3 = sol3.y[:N3, -1] 
-
+    C_final_list = [sol1.y[:N1, -1], sol2.y[:N2, -1], sol3.y[:N3, -1]]
+    rel_abundances = [C / np.sum(C) for C in C_final_list]
+    # Compute dominance in Community 3
+    total_community1, total_community2 = np.sum(C_final3[:N_list[0]]), np.sum(C_final3[N_list[0]:])
+    dominant = "Community 1" if total_community1 > total_community2 else "Community 2"
+    
     rel_abundance1 = C_final1 / np.sum(C_final1)
     rel_abundance2 = C_final2 / np.sum(C_final2)
     rel_abundance3 = C_final3 / np.sum(C_final3)
@@ -120,53 +125,55 @@ for seed in seeds:
             "Community CUE 1": community_CUE1,
             "Community CUE 2": community_CUE2,
             "Community CUE 3": community_CUE3,
-            # "Total Abundance 1": total_community1,
-            # "Total Abundance 2": total_community2,
-            # "Dominant Community": dominant,
+            "Total Abundance 1": total_community1,
+            "Total Abundance 2": total_community2,
+            "Dominant Community": dominant,
         }
-
-    for i, (val, cue_val) in enumerate(zip(rel_abundance1, species_CUE1)):
+    # Community 1
+    for i, (val, cue_val, c_val) in enumerate(zip(rel_abundance1, species_CUE1, C_final1)):
         result_entry[f"RelAbun_Comm1_Sp{i+1}"] = val
         result_entry[f"CUE_Comm1_Sp{i+1}"] = cue_val
+        result_entry[f"Cfinal_Comm1_Sp{i+1}"] = c_val
 
-    for i, (val, cue_val) in enumerate(zip(rel_abundance2, species_CUE2)):
+    # Community 2
+    for i, (val, cue_val, c_val) in enumerate(zip(rel_abundance2, species_CUE2, C_final2)):
         result_entry[f"RelAbun_Comm2_Sp{i+1}"] = val
         result_entry[f"CUE_Comm2_Sp{i+1}"] = cue_val
+        result_entry[f"Cfinal_Comm2_Sp{i+1}"] = c_val
 
-    for i, (val, cue_val) in enumerate(zip(rel_abundance3, species_CUE3)):
+    # Community 3
+    for i, (val, cue_val, c_val) in enumerate(zip(rel_abundance3, species_CUE3, C_final3)):
         result_entry[f"RelAbun_Comm3_Sp{i+1}"] = val
         result_entry[f"CUE_Comm3_Sp{i+1}"] = cue_val
+        result_entry[f"Cfinal_Comm3_Sp{i+1}"] = c_val
 
-    # # Compute dominance in Community 3
-    # total_community1, total_community2 = np.sum(C_final3[:N_list[0]]), np.sum(C_final3[N_list[0]:])
-    # dominant = "Community 1" if total_community1 > total_community2 else "Community 2"
 
     # Store results
     results.append(result_entry)
 # Convert results to DataFrame
 df_results = pd.DataFrame(results)
-df_results.to_csv("data/df_results.csv", index=False)
+df_results.to_csv("data/coal_recursive.csv", index=False)
 
-# # Assign Dominance values
-# df_results["Dominance Community 1"] = df_results["Dominant Community"].apply(lambda x: 1 if x == "Community 1" else 0)
-# df_results["Dominance Community 2"] = df_results["Dominant Community"].apply(lambda x: 1 if x == "Community 2" else 0)
+# Assign Dominance values
+df_results["Dominance Community 1"] = df_results["Dominant Community"].apply(lambda x: 1 if x == "Community 1" else 0)
+df_results["Dominance Community 2"] = df_results["Dominant Community"].apply(lambda x: 1 if x == "Community 2" else 0)
 
-# # Logistics regression and scatter plot for Community CUE vs. Dominance
-# from sklearn.linear_model import LinearRegression
-# # Merge df_results into a unified format
-# df_c1 = df_results[["Community CUE 1", "Dominance Community 1"]].rename(
-#     columns={"Community CUE 1": "CUE", "Dominance Community 1": "Dominance"}
-# )
-# df_c1["Group"] = "Community 1"
+# Logistics regression and scatter plot for Community CUE vs. Dominance
+from sklearn.linear_model import LinearRegression
+# Merge df_results into a unified format
+df_c1 = df_results[["Community CUE 1", "Dominance Community 1"]].rename(
+    columns={"Community CUE 1": "CUE", "Dominance Community 1": "Dominance"}
+)
+df_c1["Group"] = "Community 1"
 
-# # Merge "Community CUE 2" and "Dominance Community 2" into a unified format
-# df_c2 = df_results[["Community CUE 2", "Dominance Community 2"]].rename(
-#     columns={"Community CUE 2": "CUE", "Dominance Community 2": "Dominance"}
-# )
-# df_c2["Group"] = "Community 2"
-# # Concatenate both DataFrames
-# df_combined = pd.concat([df_c1, df_c2], ignore_index=True)
-# df_combined.to_csv("data/df_combined.csv", index=False)
+# Merge "Community CUE 2" and "Dominance Community 2" into a unified format
+df_c2 = df_results[["Community CUE 2", "Dominance Community 2"]].rename(
+    columns={"Community CUE 2": "CUE", "Dominance Community 2": "Dominance"}
+)
+df_c2["Group"] = "Community 2"
+# Concatenate both DataFrames
+df_combined = pd.concat([df_c1, df_c2], ignore_index=True)
+df_combined.to_csv("data/df_combined.csv", index=False)
 
 # # fit model
 # import statsmodels.api as sm

@@ -30,7 +30,7 @@ def modular_uptake(N, M, N_modules, s_ratio):
 
     # Normalize each row
     for i in range(N):
-        u[i, :] /= np.sum(u[i, :])
+        u[i, :] *= 2.5/np.sum(u[i, :])
 
     return u
 

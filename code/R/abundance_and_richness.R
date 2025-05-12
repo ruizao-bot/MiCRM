@@ -26,7 +26,7 @@ long_data <- pivot_longer(
 species_counts <- long_data %>%
   group_by(Community) %>%
   summarise(SpeciesCount = n_distinct(Species))
-
+############ Density of relative abundance ################
 ggplot(long_data %>% filter(RelativeAbundance > 0), 
        aes(x = RelativeAbundance, fill = Community, color = Community)) +
   geom_density(alpha = 0.3, adjust = 2) +
@@ -50,7 +50,8 @@ richness <- long_data_d %>%
     .groups = "drop"
   )
 
-
+# plot survival rate
+# shannon evenness analysis
 shannon_evenness <- long_data_d %>%
   group_by(Seed, Community) %>%
   summarize(
@@ -58,23 +59,74 @@ shannon_evenness <- long_data_d %>%
   Evenness = Shannon/log( sum(Status == "Survival")),
   )
 
-# plot shannon and evenness
-ggplot(shannon_evenness, aes(x = Community, y = Shannon, color = Community)) +
-  geom_jitter(width = 0.2, height = 0, alpha = 0.7, size = 2) +
-  theme_minimal() +
-  labs(title = "Shannon Index per Community",
-       x = "Community", y = "Shannon Index")
-ggplot(shannon_evenness, aes(x = Community, y = Evenness, color = Community)) +
-  geom_jitter(width = 0.2, height = 0, alpha = 0.7, size = 2) +
-  theme_minimal() +
-  labs(title = "Evenness per Community",
-       x = "Community", y = "Evenness")
+# shannon
+shannon <- shannon_evenness %>%
+  group_by(Community) %>%
+  mutate(mean_Shannon = mean(Shannon),
+         distance_to_mean = abs(Shannon - mean_Shannon),
+         norm_dist = rescale(-distance_to_mean))
+
+base_colors <- c("Comm1" = "#E41A1C", "Comm2" = "#377EB8", "Comm3" = "#4DAF4A")
+
+shannon <- shannon %>%
+  mutate(fill_color = mapply(function(comm, intensity) {
+    col <- col2rgb(base_colors[comm]) / 255
+    rgb(1 - (1 - col[1]) * intensity,
+        1 - (1 - col[2]) * intensity,
+        1 - (1 - col[3]) * intensity)
+  }, Community, norm_dist))
+
+ggplot(shannon, aes(x = Community, y = Shannon)) +
+  geom_boxplot(alpha = 0.4, outlier.shape = NA, fill = "gray90") + 
+  geom_jitter(aes(fill = fill_color), color = "black", shape = 21, 
+              size = 2.5, width = 0.15, alpha = 0.9) +  
+  scale_fill_identity() +
+  labs(x = "Community", y = "Evenness") +
+  theme_minimal()
+
+
+# evenness
+shannon_evenness <- shannon_evenness %>%
+  group_by(Community) %>%
+  mutate(mean_evenness = mean(Evenness),
+         distance_to_mean = abs(Evenness - mean_evenness),
+         norm_dist = rescale(-distance_to_mean)) 
+
+base_colors <- c("Comm1" = "#E41A1C", "Comm2" = "#377EB8", "Comm3" = "#4DAF4A") 
+
+shannon_evenness <- shannon_evenness %>%
+  mutate(fill_color = mapply(function(comm, intensity) {
+    col <- col2rgb(base_colors[comm]) / 255
+    rgb(1 - (1 - col[1]) * intensity,
+        1 - (1 - col[2]) * intensity,
+        1 - (1 - col[3]) * intensity)
+  }, Community, norm_dist))
+
+ggplot(shannon_evenness, aes(x = Community, y = Evenness)) +
+  geom_boxplot(alpha = 0.4, outlier.shape = NA, fill = "gray90") + 
+  geom_jitter(aes(fill = fill_color), color = "black", shape = 21, 
+              size = 2.5, width = 0.15, alpha = 0.9) +  
+  scale_fill_identity() +
+  labs(x = "Community", y = "Evenness") +
+  theme_minimal()
 
 # plot relative richness
 ggplot(richness, aes(x = Community, y = SurvivalRate, fill = Community)) +
-  geom_boxplot(alpha = 0.6, outlier.shape = NA) +
-  geom_jitter(width = 0.2, size = 1, alpha = 0.5) +
+  geom_boxplot(alpha = 0.4, outlier.shape = NA) + 
+  geom_jitter(aes(fill = Community), color = "black", shape = 21, 
+              size = 2.5, width = 0.15, alpha = 0.8) +  
+  scale_fill_brewer(palette = "Set2") +  
+  labs(x = "Community", y = "Evenness") +
   theme_minimal() +
-  labs(title = "Distribution of Relative Species Richness per Community",
-       x = "Community", y = "Relative Richness (Survival Rate)")
+  theme(legend.position = "none")
+
+# anova of Shannon
+anova_result <- aov(Shannon ~ Community, data = shannon_evenness)
+summary(anova_result)
+TukeyHSD(anova_result)
+
+# anova of evenness
+anova_result <- aov(Evenness ~ Community, data = shannon_evenness)
+summary(anova_result)
+TukeyHSD(anova_result)
 

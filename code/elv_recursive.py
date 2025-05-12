@@ -217,30 +217,40 @@ for seed in seeds:
         return dCdt
     # Solve the dynamics of Community 3
     sol3 = solve_ivp(dCdt_elv3, t_span, C0_3, t_eval=t_eval)
-    r1_add = np.pad(r1, (0, N2), mode='constant', constant_values=0)
-    r2_add = np.pad(r2, (N1, 0), mode='constant', constant_values=0)
-    length_r1 = np.linalg.norm(r1_add)
-    length_r2 = np.linalg.norm(r2_add)
-    length_r3 = np.linalg.norm(r3)
+
     community_CUE1, species_CUE1 = CUE.compute_community_CUE2(sol1, N1, u1, R_guess1, l1, m1)
     community_CUE2, species_CUE2 = CUE.compute_community_CUE2(sol2, N2, u2, R_guess2, l2, m2)
     community_CUE3, species_CUE3 = CUE.compute_community_CUE2(sol3, N3, u3, R_guess3, l3, m3)
-    results.append({
-        "Seed": seed,
-        "Length r1": length_r1,
-        "Length r2": length_r2,
-        "Length r3": length_r3,
-        "Community CUE 1": community_CUE1,
-        "Community CUE 2": community_CUE2,
-        "Community CUE 3": community_CUE3,
-        "C_final": sol3.y[:, -1]
-    })
+    
+    result_entry = {"Seed": seed}
+    sol_list = [sol1, sol2, sol3] 
+    N_list = [N1, N2, N3] 
+    u_list = [u1, u2, u3]
+    R0_list = [R_guess1, R_guess2, R_guess3]
+    l_list = [l1, l2, l3]
+    m_list = [m1, m2, m3]
+    M_list = [M1, M2, M3]
+    r_list = [r1, r2, r3]
+    C_final_list = []
+    num_communities = len(sol_list) 
+    for i in range(num_communities):
 
-df_out = pd.DataFrame(results)
-df_out.to_csv("data/growth rate length vs. CUE.csv", index=False)
+        C_final = np.array(sol_list[i].y[:, -1])
+        C_final_list.append(C_final)
 
+        _, species_CUE = CUE.compute_community_CUE2(
+            sol_list[i], N_list[i], u_list[i], R0_list[i], l_list[i], m_list[i]
+        )
+
+        for j, (r_val, cue_val, c_val) in enumerate(zip(r_list[i], species_CUE, C_final)):
+            result_entry[f"r_Comm{i+1}_Sp{j+1}"] = r_val
+            result_entry[f"CUE_Comm{i+1}_Sp{j+1}"] = cue_val
+            result_entry[f"Cfinal_Comm{i+1}_Sp{j+1}"] = c_val
+
+    results.append(result_entry)
 
 df_results = pd.DataFrame(results)
+df_results.to_csv("data/elv_recursive.csv", index=False)
 
 
 # plt.figure(figsize=(6, 4))

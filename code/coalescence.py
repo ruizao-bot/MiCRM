@@ -13,12 +13,12 @@ np.random.seed(37)
 N_pool = 1000  # Species pool size
 M_pool = 20     # Resource pool size
 λ = 0.2        # Total leakage rate
-N_modules = 5  # Number of modules
-s_ratio = 10.0 # Modularity ratio
-N1 = 10
+N_modules = 1  # Number of modules
+s_ratio = 10 # Modularity ratio
+N1 = 100
 M1 = 5
-m1 = np.full(N1, 0.2)  # maintaining cost rate
-N2 = 10
+m1 = np.full(N1, 0.2) # maintaining cost rate
+N2 = 100
 M2 = 5
 m2 = np.full(N2, 0.2)
 # Generate uptake matrix and leakage tensor for the species pool
@@ -97,11 +97,11 @@ uu = u_pool[np.ix_(species_indices3, resource_indices3)]
 ll = l_pool[np.ix_(species_indices3, resource_indices3, resource_indices3)]
 m3 = np.concatenate([m1, m2])
 lambda_alpha3 = np.full(len(resource_indices3), λ)
-rho3 = rho_pool[resource_indices3]
+
 omega3 = omega_pool[resource_indices3]
 N3 = N1 + N2
 M3 = len(resource_indices3)
-
+rho3 = rho_pool[resource_indices3]
 C0_3 = np.concatenate([ce1, ce2])
 R0_3 = re1 + re2
 Y0_3 = np.concatenate([C0_3, R0_3])
@@ -138,81 +138,42 @@ axes[2].legend(loc='upper right', fontsize='small', ncol=2)
 plt.tight_layout()
 plt.show()
 ###### compare the community CUE between survival and extinction######
-sol_list = [sol1, sol2, sol3]  # List of community solutions
-N_list = [N1, N2, N3]  # Number of consumers for each community
+sol_list = [sol1, sol2, sol3]
+N_list = [N1, N2, N3]
 u_list = [u1, u2, uu]
 R0_list = [R0, R0, R0_3]
 l_list = [l1, l2, ll]
 m_list = [m1, m2, m3]
 M_list = [M1, M2, M3]
-num_communities = len(sol_list)  # Number of communities
-data_to_save = [] 
+num_communities = len(sol_list)
+
+data_to_save = []
+
 for i in range(num_communities):
-    C_final = np.array(sol_list[i].y[:, -1])  # shape: (num_species,)
-    
-    community_CUE, species_CUE = CUE.compute_community_CUE2(
+    C_final = np.array(sol_list[i].y[:, -1])
+    t = sol_list[i].t
+    C_all = sol_list[i].y[:N_list[i], :]
+    dCdt_all = np.gradient(C_all, t, axis=1)
+    max_growth_rates = np.max(dCdt_all, axis=1)
+
+    _, species_CUE = CUE.compute_community_CUE2(
         sol_list[i], N_list[i], u_list[i], R0_list[i], l_list[i], m_list[i]
     )
-    species_CUE = np.array(species_CUE, dtype=float)  # shape: (num_species_filtered,)
+    species_CUE = np.array(species_CUE, dtype=float)
 
-    surviving_CUE = []
-    extinct_CUE = []
-    # Separate surviving and extinct species based on CUE threshold
-    surviving_CUE = [species_CUE[j] for j in range(len(species_CUE)) if C_final[j] >= 0.01]
-    extinct_CUE = [species_CUE[j] for j in range(len(species_CUE)) if C_final[j] < 0.01]
-    surviving_species_count = len(surviving_CUE)
-
-
-    mean_surviving_CUE = np.mean(surviving_CUE) if surviving_CUE else np.nan
-    mean_extinct_CUE = np.mean(extinct_CUE) if extinct_CUE else np.nan
-
-    print(f"Community {i+1}:")
-    print(f"  Surviving species count: {surviving_species_count}")
-    print(f"  Mean CUE (Surviving): {mean_surviving_CUE:.4f}")
-    print(f"  Mean CUE (Extinct):   {mean_extinct_CUE:.4f}")
-    print("-" * 50)
-
-
-    for val in surviving_CUE:
+    for j in range(N_list[i]):
+        status = "Survival" if C_final[j] >= 0.01 else "Extinction"
         data_to_save.append({
             "Community": i + 1,
-            "Status": "Survival",
-            "CUE": val
-        })
-    for val in extinct_CUE:
-        data_to_save.append({
-            "Community": i + 1,
-            "Status": "Extinction",
-            "CUE": val
+            "Species": f"Sp{j+1}",
+            "Status": status,
+            "CUE": species_CUE[j],
+            "C_final": C_final[j],
+            "Max_Growth_Rate": max_growth_rates[j]
         })
 
-# After the loop: create a DataFrame and save to CSV
 df_out = pd.DataFrame(data_to_save)
-df_out.to_csv("data/CUE_distribution.csv", index=False)
+df_out.to_csv("data/coal_single.csv", index=False)
 
-############### Control R0_3 value ######################
-R0_3_values = np.linspace(0, 5, 50)  # 50 different R0_3 values
-cue_community = []
 
-# # Iterate over different R0_3 values
-# for R0_3_val in R0_3_values:
-#     R0_3 = np.full(M, R0_3_val)  # Ensure R0_3 is an array of size (M,)
-#     Y0_3 = np.concatenate([C0_3, R0_3])  # Ensure Y0_3 is correct shape
-
-#     sol3 = solve_ivp(dCdt_Rdt, t_span, Y0_3, t_eval=t_eval, args=(uu, ll, N3, M, m3, rho3, omega3))
-
-#     # Compute total CUE integral
-#     average_CUE, _ = CUE.compute_community_CUE2(sol3, N3, uu, R0_3, ll, m3)  # Unpack if function returns tuple
-
-#     # Store integral value
-#     cue_community.append(average_CUE)
-
-# # Plotting outside the loop
-# plt.figure(figsize=(8, 5))
-# plt.plot(R0_3_values, cue_community, marker='o', linestyle='-', color='b')
-# plt.xlabel("R0_3 Value (Resource Input Rate)")
-# plt.ylabel("Total Numerical Integral of CUE")
-# plt.title("Effect of R0_3 on Community CUE")
-# plt.grid()
-# plt.show()
 
