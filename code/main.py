@@ -5,13 +5,13 @@ import param
 
 
 # parameters
-N = 5  # consumer number
-M = 5  # resource number
+N = 100  # consumer number
+M = 50  # resource number
 λ = 0.3  # total leakage rate
 λ_u = np.ones(N)
 
-N_modules = 2 #  module number of consumer to resource
-s_ratio = 10.0 
+N_modules = 1 #  module number of consumer to resource
+s_ratio = 1.0 
 # When s_ratio = 1: Resources have a uniform leakage probability；
 # When s_ratio > 1: Increases leakage probability within the same module, Increases leakage probability between adjacent modules.
 

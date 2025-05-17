@@ -13,3 +13,16 @@ ggplot(df_survival, aes(x = CUE, y = Max_Growth_Rate)) +
        x = "Species CUE",
        y = "Growth Rate (r)") +
   theme_minimal()
+
+ggplot(df, aes(x = factor(Community), y = CUE, fill = Community)) +
+  geom_boxplot() +
+  labs(title = "",
+       x = "Community", y = "CUE") +
+  theme_minimal()
+
+ggplot(df, aes(x = Status, y = CUE, fill = Status)) +
+  geom_boxplot() +
+  facet_wrap(~ Community) +
+  labs(title = "CUE by Survival Status in Each Community",
+       x = "Status", y = "CUE") +
+  theme_minimal()

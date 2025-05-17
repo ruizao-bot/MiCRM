@@ -1,3 +1,11 @@
+from multiprocessing import Pool, cpu_count
+
+def worker(x):
+    return x * x
+
+with Pool(processes=cpu_count()) as pool:
+    results = pool.map(worker, range(100))
+
 import numpy as np
 import os
 import sys
@@ -18,15 +26,15 @@ with open('seeds.txt', 'r') as f:
 for seed in seeds:
     np.random.seed(seed)
     N_pool = 1000  # Species pool size
-    M_pool = 20     # Resource pool size
+    M_pool = 200     # Resource pool size
     λ = 0.2        # Total leakage rate
     N_modules = 1  # Number of modules
-    s_ratio = 10.0 # Modularity ratio
-    N1 = 10
-    M1 = 5
+    s_ratio = 1.0 # Modularity ratio
+    N1 = 100
+    M1 = 50
     m1 = np.full(N1, 0.2)  # maintaining cost rate
-    N2 = 10
-    M2 = 5
+    N2 = 100
+    M2 = 50
     m2 = np.full(N2, 0.2)
     # Generate uptake matrix and leakage tensor for the species pool
     u_pool = param.modular_uptake(N_pool, M_pool, N_modules, s_ratio)
@@ -58,36 +66,15 @@ for seed in seeds:
     lambda_alpha2 = np.full(M2, λ)
     rho2 = rho_pool[resource_indices2]
     omega2 = omega_pool[resource_indices2]
+    R0 = np.full(M, 1.0)
+    sol1 = param.solve_micrm(N1, M1, u1, l1, m1, lambda_alpha1, rho1, omega1)
+    sol2 = param.solve_micrm(N2, M2, u2, l2, m2, lambda_alpha2, rho2, omega2)
 
-
-    # Function for ODE system
-    def dCdt_Rdt(t, y, u, l, N, M, m, rho, omega):
-        C, R = y[:N], y[N:]
-        dCdt, dRdt = np.zeros(N), np.zeros(M)
-
-        for i in range(N):
-            dCdt[i] = sum(C[i] * R[alpha] * u[i, alpha] * (1 - λ) for alpha in range(M)) - C[i] * m[i]
-
-        for alpha in range(M):
-            dRdt[alpha] = rho[alpha] - R[alpha] * omega[alpha]
-            dRdt[alpha] -= sum(C[i] * R[alpha] * u[i, alpha] for i in range(N))
-            dRdt[alpha] += sum(sum(C[i] * R[beta] * u[i, beta] * l[i, beta, alpha] for beta in range(M)) for i in range(N))
-
-        return np.concatenate([dCdt, dRdt])
-
-    # Solve ODE for each community
-    t_span, t_eval = (0, 500), np.linspace(0, 500, 300)
-    C0, R0 = np.full(N1, 0.01), np.full(M1, 1)
-
-    sol1 = solve_ivp(dCdt_Rdt, t_span, np.concatenate([C0, R0]), t_eval=t_eval, args=(u1, l1, N1, M1, m1, rho1, omega1))
-    sol2 = solve_ivp(dCdt_Rdt, t_span, np.concatenate([C0, R0]), t_eval=t_eval, args=(u2, l2, N2, M2, m2, rho2, omega2))
-
-    
     # Merge into Community 3
     species_indices3 = np.concatenate([species_indices1, species_indices2])
     resource_indices3 = resource_indices1 if M1 >= M2 else resource_indices2
-    uu = u_pool[np.ix_(species_indices3, resource_indices3)]
-    ll = l_pool[np.ix_(species_indices3, resource_indices3, resource_indices3)]
+    u3 = u_pool[np.ix_(species_indices3, resource_indices3)]
+    l3 = l_pool[np.ix_(species_indices3, resource_indices3, resource_indices3)]
     m3 = np.concatenate([m1, m2])
     lambda_alpha3 = np.full(len(resource_indices3), λ)
     
@@ -99,13 +86,13 @@ for seed in seeds:
     R0_3 = sol1.y[N1:, -1]  + sol2.y[N2:, -1]
     Y0_3 = np.concatenate([C0_3, R0_3])
 
-    sol3 = solve_ivp(dCdt_Rdt, t_span, np.concatenate([C0_3, R0_3]), t_eval=t_eval, args=(uu, ll, N3, M3, m3, rho3, omega3))
+    sol3 = param.solve_micrm(N3, M3, u3, l3, m3, lambda_alpha3, rho3, omega3)
     sol_list = [sol1, sol2, sol3]
     N_list = [N1, N2, N3]
     # Compute Community CUE for each community
     community_CUE1, species_CUE1 = CUE.compute_community_CUE2(sol1, N1, u1, R0, l1, m1)
     community_CUE2, species_CUE2 = CUE.compute_community_CUE2(sol2, N2, u2, R0, l2, m2)
-    community_CUE3, species_CUE3 = CUE.compute_community_CUE2(sol3, N3, uu, R0_3, ll, m3)
+    community_CUE3, species_CUE3 = CUE.compute_community_CUE2(sol3, N3, u3, R0_3, l3, m3)
     # 
     # Calculate relative abundance
     C_final1 = sol1.y[:N1, -1] 
@@ -152,7 +139,7 @@ for seed in seeds:
     results.append(result_entry)
 # Convert results to DataFrame
 df_results = pd.DataFrame(results)
-df_results.to_csv("data/coal_recursive.csv", index=False)
+df_results.to_csv("data/coal_recursive_50.csv", index=False)
 
 # Assign Dominance values
 df_results["Dominance Community 1"] = df_results["Dominant Community"].apply(lambda x: 1 if x == "Community 1" else 0)
@@ -173,7 +160,7 @@ df_c2 = df_results[["Community CUE 2", "Dominance Community 2"]].rename(
 df_c2["Group"] = "Community 2"
 # Concatenate both DataFrames
 df_combined = pd.concat([df_c1, df_c2], ignore_index=True)
-df_combined.to_csv("data/df_combined.csv", index=False)
+df_combined.to_csv("data/df_combined_50.csv", index=False)
 
 # # fit model
 # import statsmodels.api as sm

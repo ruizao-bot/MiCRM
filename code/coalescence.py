@@ -11,16 +11,17 @@ import matplotlib.pyplot as plt
 # Parameter settings
 np.random.seed(37)
 N_pool = 1000  # Species pool size
-M_pool = 20     # Resource pool size
+M_pool = 200     # Resource pool size
 λ = 0.2        # Total leakage rate
 N_modules = 1  # Number of modules
-s_ratio = 10 # Modularity ratio
+s_ratio = 1 # Modularity ratio
 N1 = 100
-M1 = 5
-m1 = np.full(N1, 0.2) # maintaining cost rate
+M1 = 50
+m1 = np.full(N1, 0.2)
 N2 = 100
-M2 = 5
+M2 = 50
 m2 = np.full(N2, 0.2)
+
 # Generate uptake matrix and leakage tensor for the species pool
 u_pool = param.modular_uptake(N_pool, M_pool, N_modules, s_ratio)
 l_pool = param.generate_l_tensor(N_pool, M_pool, N_modules, s_ratio, λ)
@@ -31,6 +32,7 @@ omega_pool = np.full(M_pool, 0.1)
 species_indices1 = np.random.choice(N_pool, N1, replace=False)
 resource_indices1 = np.random.choice(M_pool, M1, replace=False)
 u1 = u_pool[np.ix_(species_indices1, resource_indices1)]
+
 l1 = l_pool[np.ix_(species_indices1, resource_indices1, resource_indices1)]
 lambda_alpha1 = np.full(M1, λ)
 rho1 = rho_pool[resource_indices1]
@@ -47,54 +49,35 @@ else:
 remaining_species = np.setdiff1d(np.arange(N_pool), species_indices1)
 species_indices2 = np.random.choice(remaining_species, N2, replace=False)
 u2 = u_pool[np.ix_(species_indices2, resource_indices2)]
+
 l2 = l_pool[np.ix_(species_indices2, resource_indices2, resource_indices2)]
 lambda_alpha2 = np.full(M2, λ)
 rho2 = rho_pool[resource_indices2]
 omega2 = omega_pool[resource_indices2]
 
-
-# Define the differential equations
-def dCdt_Rdt(t, y, u, l, N, M, m, rho, omega):
-    C = y[:N]
-    R = y[N:]
-    dCdt = np.zeros(N)
-    dRdt = np.zeros(M)
-    
-    for i in range(N):
-        dCdt[i] = sum(C[i] * R[alpha] * u[i, alpha] * (1 - λ) for alpha in range(M)) - C[i] * m[i]
-    
-    for alpha in range(M):
-        dRdt[alpha] = rho[alpha] - R[alpha] * omega[alpha]
-        dRdt[alpha] -= sum(C[i] * R[alpha] * u[i, alpha] for i in range(N))
-        dRdt[alpha] += sum(sum(C[i] * R[beta] * u[i, beta] * l[i, beta, alpha] for beta in range(M)) for i in range(N))
-    
-    return np.concatenate([dCdt, dRdt])
-
 # Time span for simulation
-t_span = (0, 500)
+t_span = (0, 600)
 t_eval = np.linspace(*t_span, 300)
 
 # Simulate Community 1
-C0_1 = np.full(N1, 0.01)  # Initial consumer abundance
+C0 = np.full(N1, 0.01)  # Initial consumer abundance
 R0 = np.full(M1, 1)        # Initial resource abundance
-Y0_1 = np.concatenate([C0_1, R0])
-sol1 = solve_ivp(dCdt_Rdt, t_span, Y0_1, t_eval=t_eval, args=(u1, l1, N1, M1, m1, rho1, omega1))
+
+sol1 = param.solve_micrm(N1, M1, u1, l1, m1, lambda_alpha1, rho1, omega1)
 ce1 = sol1.y[:N1, -1]  # Consumer abundance at equilibrium
 re1 = sol1.y[N1:, -1]  # Resource abundance at equilibrium
 
 # Simulate Community 2
-C0_2 = np.full(N2, 0.01)
-Y0_2 = np.concatenate([C0_2, R0])
-sol2 = solve_ivp(dCdt_Rdt, t_span, Y0_2, t_eval=t_eval, args=(u2, l2, N2, M2, m2, rho2, omega2))
+sol2 = param.solve_micrm(N2, M2, u2, l2, m2, lambda_alpha2, rho2, omega2)
 ce2 = sol2.y[:N2, -1]
 re2 = sol2.y[N2:, -1]
-
 
 # Merge into Community 3
 species_indices3 = np.concatenate([species_indices1, species_indices2])
 resource_indices3 = resource_indices1 if M1 >= M2 else resource_indices2
-uu = u_pool[np.ix_(species_indices3, resource_indices3)]
-ll = l_pool[np.ix_(species_indices3, resource_indices3, resource_indices3)]
+u3 = u_pool[np.ix_(species_indices3, resource_indices3)]
+
+l3 = l_pool[np.ix_(species_indices3, resource_indices3, resource_indices3)]
 m3 = np.concatenate([m1, m2])
 lambda_alpha3 = np.full(len(resource_indices3), λ)
 
@@ -104,8 +87,7 @@ M3 = len(resource_indices3)
 rho3 = rho_pool[resource_indices3]
 C0_3 = np.concatenate([ce1, ce2])
 R0_3 = re1 + re2
-Y0_3 = np.concatenate([C0_3, R0_3])
-sol3 = solve_ivp(dCdt_Rdt, t_span, Y0_3, t_eval=t_eval, args=(uu, ll, N3, M3, m3, rho3, omega3))
+sol3 = param.solve_micrm(N3, M3, u3, l3, m3, lambda_alpha3, rho3, omega3, C0_3, R0_3)
 #############################################
 # Plot biomass change over time
 fig, axes = plt.subplots(1, 3, figsize=(15, 5), sharey=True)
@@ -140,9 +122,9 @@ plt.show()
 ###### compare the community CUE between survival and extinction######
 sol_list = [sol1, sol2, sol3]
 N_list = [N1, N2, N3]
-u_list = [u1, u2, uu]
+u_list = [u1, u2, u3]
 R0_list = [R0, R0, R0_3]
-l_list = [l1, l2, ll]
+l_list = [l1, l2, l3]
 m_list = [m1, m2, m3]
 M_list = [M1, M2, M3]
 num_communities = len(sol_list)

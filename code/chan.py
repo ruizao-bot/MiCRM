@@ -1,9 +1,8 @@
 ############################# PRODUCING ACTUAL SIMULATION GRAPHS #############################
 import numpy as np
-import os
-import sys
+import sys, os
+sys.path.insert(0, os.path.expanduser("~/Documents/MiCRM/code"))
 
-sys.path.append(os.path.expanduser("~/Documents/MiCRM/code"))
 import param
 from numpy.random import default_rng
 from scipy.integrate import solve_ivp
@@ -22,9 +21,10 @@ compare how temperature affects the deviation between MiCRM and EGLV graphs
 """
 
 
+
 rng = default_rng(111)
 
-N = 7
+N = 100
 M = 5
 L = np.full(N, 0.3) # leakage (this is not temp dependent, as per original MiCRM)
 
@@ -41,13 +41,13 @@ Ed = 3.5
 ####### TEST OUT DIFFERENT TEMPERATURES #######
 
 
-structural = generate_params(
+structural = chan_function.generate_params(
     N, M,
-    f_u=def_u,      # relative preferences only
-    f_m=def_m,      # placeholder
-    f_rho=def_rho,
-    f_omega=def_omega,
-    f_l=def_l,
+    f_u=chan_function.def_u,      # relative preferences only
+    f_m=chan_function.def_m,      # placeholder
+    f_rho=chan_function.def_rho,
+    f_omega=chan_function.def_omega,
+    f_l=chan_function.def_l,
     # *no* T, Tr, Ed, rho_t here
     L=L,
     T=273.15,   # dummy (This satisfies temp_trait’s requirement that kw contain T, rho_t, Tr, Ed) 
@@ -73,7 +73,7 @@ for T in temp_vals:
 
     # temp-dependent scalars
 
-    temp_p, B, E, Tp = temp_trait(N, {
+    temp_p, B, E, Tp = chan_function.temp_trait(N, {
         'T': T, 'Tr': Tr, 'Ed': Ed, 'rho_t': rho_t, 'L': L
     })
     temp_p_u = temp_p[:,0]
@@ -95,15 +95,15 @@ for T in temp_vals:
     t_max_micrm = 500
     t_max_glv   = 500
 
-    t_eval_micrm = np.linspace(0, t_max_micrm, 1000)
-    t_eval_glv   = np.linspace(0, t_max_glv,   1000)
+    t_eval_micrm = np.linspace(0, t_max_micrm, 500)
+    t_eval_glv   = np.linspace(0, t_max_glv,   500)
 
 
     # solve MiCRM at this temperature
     
 
     sol = solve_ivp(
-        lambda t, y: MiCRM_dxx(y, t, pT),
+        lambda t, y: chan_function.MiCRM_dxx(y, t, pT),
         t_span=(0, t_max_micrm),
         y0=x0,
         method='BDF',
@@ -113,16 +113,17 @@ for T in temp_vals:
     
     # solve EGLV at this temperature
     
-    p_lv = eff_LV_params(pT, sol, verbose=False)
+    p_lv = chan_function.eff_LV_params(pT, sol, verbose=False)
 
     sol_lv = solve_ivp(
-        lambda t, y: LV_dx(y, t, p_lv),
+        lambda t, y: chan_function.LV_dx(y, t, p_lv),
         t_span=(0, t_max_glv), 
         y0=sol.y[:N, 0],
         method='BDF', 
         t_eval=t_eval_glv        
         )
     
+    """"
     ##### deviation calculations #####
 
     # first collect the equilibrium values for MiCRM and GLV (this is the last value in time series, t1)
@@ -131,37 +132,37 @@ for T in temp_vals:
 
        
     # equilibrium abundance deviation 
-    ErrEqAb, overlap = err_eq_and_overlap(C_LV_eq, C_MiCRM_eq)
+    ErrEqAb, overlap = chan_function.err_eq_and_overlap(C_LV_eq, C_MiCRM_eq)
 
     # trajectory deviation  
     times      = sol.t                   # shape (T,). this defines the time array to be investigated in trajectory deviations 
     C_Mi_traj  = sol.y[:N, :]            # shape (N, T). this is the MiCRM trajectory, to be analysed in trajectory deviations 
     C_LV_traj  = sol_lv.y[:N, :]         # shape (N, T). this is the GLVM trajectory, to be analysed in trajectory deviations 
-    err_t, overlap_t = err_time_series(times, C_LV_traj, C_Mi_traj) # first get the time series 
-    j_eq = estimate_teq(times, sol, sol_lv, pT, p_lv, tol=1e-6, window=5) # find equilibrium time 
+    err_t, overlap_t = chan_function.err_time_series(times, C_LV_traj, C_Mi_traj) # first get the time series 
+    j_eq = chan_function.estimate_teq(times, sol, sol_lv, pT, p_lv, tol=1e-6, window=5) # find equilibrium time 
     times_crop = times[: j_eq + 1] # crop time array to equilibrium 
     err_crop   = err_t[: j_eq + 1] # crop trajectory error array to equilibrium 
-    Err_traj = integrate_err(times_crop, err_crop) # integrate over [0, t_eq] instead of [0, t_max]
+    Err_traj = chan_function.integrate_err(times_crop, err_crop) # integrate over [0, t_eq] instead of [0, t_max]
 
     # diversity deviation
-    jaccard = jaccard_index(C_LV_eq, C_MiCRM_eq, thresh=1e-6)
-    sh_LV = shannon(C_LV_eq)
-    sh_Mi = shannon(C_MiCRM_eq)
-    bc = bray_curtis_dissimilarity(C_LV_eq, C_MiCRM_eq)
+    jaccard = chan_function.jaccard_index(C_LV_eq, C_MiCRM_eq, thresh=1e-6)
+    sh_LV = chan_function.shannon(C_LV_eq)
+    sh_Mi = chan_function.shannon(C_MiCRM_eq)
+    bc = chan_function.bray_curtis_dissimilarity(C_LV_eq, C_MiCRM_eq)
 
     # stability (Jacobian) and reactivity (Hermitian) 
 
-    J_glv   = eff_LV_jac(p_lv, sol)
-    stab_glv  = leading_eigenvalue(J_glv)
-    react_glv = leading_hermitian_eigenvalue(J_glv)
+    J_glv   = chan_function.eff_LV_jac(p_lv, sol)
+    stab_glv  = chan_function.leading_eigenvalue(J_glv)
+    react_glv = chan_function.leading_hermitian_eigenvalue(J_glv)
 
-    J_micrm   = MiCRM_jac(pT, sol)
-    stab_mic  = leading_eigenvalue(J_micrm)
-    react_mic = leading_hermitian_eigenvalue(J_micrm)
+    J_micrm   = chan_function.MiCRM_jac(pT, sol)
+    stab_mic  = chan_function.leading_eigenvalue(J_micrm)
+    react_mic = chan_function.leading_hermitian_eigenvalue(J_micrm)
 
     # timescale separation 
 
-    J_full = MiCRM_jac(pT, sol)                 # (N+M)x(N+M)
+    J_full = chan_function.MiCRM_jac(pT, sol)                 # (N+M)x(N+M)
     diagJ  = np.diag(J_full)
     # consumer return times τ_{C_i} = 1/|J_{ii}| for i=0..N-1
     tau_Cs = 1.0/np.abs(diagJ[:N])
@@ -215,3 +216,43 @@ taus_R      = [r['tau_R']    for r in results]
 epsilons    = [r['epsilon']  for r in results]
 
 
+"""
+
+u = structural['u']
+m = structural['m']
+R0 = x0[N:N+M]
+C0 = x0[0:N]
+R_final = sol.y[N: N+M]
+C_final = sol.y[0, N]
+
+total_uptake = np.sum(u * R0, axis=1)
+net_uptake = np.sum(u * R0 * 0.7, axis=1) - m
+CUE = net_uptake / total_uptake
+
+# growth rate
+r = np.zeros(N)
+for i in range(N):
+    growth_term = sum(u[i, a] * 0.7 * R0[a] for a in range(M))
+    interaction_term = sum(0.7* C0[j] for j in range(N))
+    r[i] = growth_term - m[i] - interaction_term
+
+survivors = C_final > 1e-6
+
+plt.figure(figsize=(8, 6))
+
+# 存活物种
+plt.scatter(CUE[survivors], r[survivors], 
+            label='Survivors', color='#EF8F8C', alpha=0.9, s=60)
+
+# 灭绝物种
+plt.scatter(CUE[~survivors], r[~survivors], 
+            label='Extinct', color='#4F363E', alpha=0.5, s=60)
+
+# 标注
+plt.xlabel('Species CUE')
+plt.ylabel('Intrinsic growth rate $r_i$')
+plt.legend()
+plt.grid(True)
+plt.title('CUE vs $r_i$')
+plt.tight_layout()
+plt.show()
