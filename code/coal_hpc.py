@@ -6,7 +6,6 @@ code_path = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(code_path)
 import param
 import CUE
-
 def simulate(seed):
     np.random.seed(seed)
     
@@ -113,8 +112,6 @@ def simulate(seed):
 
     return species_data
 
-
-"""
 if __name__ == "__main__":
     with open('seeds.txt', 'r') as f:
         seeds = [int(line.strip()) for line in f]
@@ -124,4 +121,3 @@ if __name__ == "__main__":
     all_species_data = [row for seed_result in all_species_data_nested if seed_result for row in seed_result]
     df = pd.DataFrame(all_species_data)
     df.to_csv("../data/coal_recursive_50.csv", index=False)
-    """

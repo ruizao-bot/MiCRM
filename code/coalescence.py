@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 # Parameter settings
 np.random.seed(37)
 N_pool = 1000  # Species pool size
-M_pool = 200     # Resource pool size
+M_pool = 200    # Resource pool size
 λ = 0.2        # Total leakage rate
 N_modules = 1  # Number of modules
 s_ratio = 1 # Modularity ratio
@@ -90,7 +90,7 @@ R0_3 = re1 + re2
 sol3 = param.solve_micrm(N3, M3, u3, l3, m3, lambda_alpha3, rho3, omega3, C0_3, R0_3)
 #############################################
 # Plot biomass change over time
-fig, axes = plt.subplots(1, 3, figsize=(15, 5), sharey=True)
+fig, axes = plt.subplots(1, 3, figsize=(18, 5), sharey=True)
 # Plot for Community 1
 cmap1 = plt.get_cmap("Blues")
 for i, idx in enumerate(species_indices1):
@@ -117,7 +117,8 @@ axes[2].set_title('Coalescence Dynamics')
 axes[2].set_xlabel('Time')
 axes[2].grid(True)
 axes[2].legend(loc='upper right', fontsize='small', ncol=2)
-plt.tight_layout()
+plt.tight_layout(rect=[0, 0, 0.85, 1])  # leaves space on the right for legends
+
 plt.show()
 ###### compare the community CUE between survival and extinction######
 sol_list = [sol1, sol2, sol3]
@@ -153,9 +154,9 @@ for i in range(num_communities):
             "C_final": C_final[j],
             "Max_Growth_Rate": max_growth_rates[j]
         })
-
+"""
 df_out = pd.DataFrame(data_to_save)
 df_out.to_csv("data/coal_single.csv", index=False)
-
+"""
 
 

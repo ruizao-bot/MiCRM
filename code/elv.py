@@ -16,21 +16,21 @@ N_modules = 1  # Number of modules
 s_ratio = 1.0 # Modularity ratio
 N1 = 100
 M1 = 50
-m1 = truncnorm.rvs((0 - 1) / 0.01, np.inf, loc=1, scale=0.01, size=N1)  # maintaining cost rate
+m1 = np.full(N1, 0.2)  # maintaining cost rate
 N2 = 100
 M2 = 50
-m2 = truncnorm.rvs((0 - 1) / 0.01, np.inf, loc=1, scale=0.01, size=N2)
+m2 =  np.full(N2, 0.2)#truncnorm.rvs((0 - 1) / 0.01, np.inf, loc=1, scale=0.01, size=N2)
 # Generate uptake matrix and leakage tensor for the species pool
 u_pool = param.modular_uptake(N_pool, M_pool, N_modules, s_ratio)
 l_pool = param.generate_l_tensor(N_pool, M_pool, N_modules, s_ratio, λ)
 # Set rho and omega for the resource pool
-rho_pool = np.full(M_pool, 0.5)
-omega_pool = np.full(M_pool, 0.5)
+rho_pool = np.full(M_pool, 0.6)
+omega_pool = np.full(M_pool, 0.1)
 # Community 1
 species_indices1 = np.random.choice(N_pool, N1, replace=False)
 resource_indices1 = np.random.choice(M_pool, M1, replace=False)
 u1 = u_pool[np.ix_(species_indices1, resource_indices1)]
-u1 = 2.5 * u1 / u1.sum(axis=1, keepdims=True)
+#u1 = 2.5 * u1 / u1.sum(axis=1, keepdims=True)
 l1 = l_pool[np.ix_(species_indices1, resource_indices1, resource_indices1)]
 lambda_alpha1 = np.full(M1, λ)
 rho1 = rho_pool[resource_indices1]
@@ -47,7 +47,7 @@ else:
 remaining_species = np.setdiff1d(np.arange(N_pool), species_indices1)
 species_indices2 = np.random.choice(remaining_species, N2, replace=False)
 u2 = u_pool[np.ix_(species_indices2, resource_indices2)]
-u2 = 2.5 * u2 / u2.sum(axis=1, keepdims=True)
+#u2 = 2.5 * u2 / u2.sum(axis=1, keepdims=True)
 l2 = l_pool[np.ix_(species_indices2, resource_indices2, resource_indices2)]
 lambda_alpha2 = np.full(M2, λ)
 rho2 = rho_pool[resource_indices2]
@@ -75,7 +75,7 @@ species_indices3 = np.concatenate([species_indices1, species_indices2])
 resource_indices3 = resource_indices1 if M1 >= M2 else resource_indices2
 N3 = N1 + N2
 u3 = u_pool[np.ix_(species_indices3, resource_indices3)]
-u3 = 2.5 * u3 / u3.sum(axis=1, keepdims=True)
+# u3 = 2.5 * u3 / u3.sum(axis=1, keepdims=True)
 l3 = l_pool[np.ix_(species_indices3, resource_indices3, resource_indices3)]
 m3 = np.concatenate([m1, m2])
 lambda_alpha3 = np.full(len(resource_indices3), λ)

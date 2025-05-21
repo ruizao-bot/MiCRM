@@ -1,0 +1,31 @@
+# first step
+sftp yan@harvey.dept.imperial.ac.uk
+# password
+zhuyan0624
+
+# change to your own directory
+mkdir yourown
+cd yourown
+put yourown.py
+
+
+# check if it is there
+open another teminal and type
+ssh yan@harvey.dept.imperial.ac.uk
+
+cd yourown
+ls -l
+
+nano yourown.sh
+#!/bin/bash
+#SBATCH --time=0-00:30:00     # Maximum time limit (30 minutes)
+#SBATCH --ntasks=1            # Number of tasks
+#SBATCH --cpus-per-task=1     # Number of CPU cores per task
+#SBATCH --mem=300G            # Memory per node
+#SBATCH --partition=large_336 # Must keep this requirement on anything running on Harvey
+
+then run your code using
+sbatch yourown.sh
+
+check the process
+squeue -u yan

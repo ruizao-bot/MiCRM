@@ -5,20 +5,12 @@ library(tidyr)
 library(dplyr)
 library(stringr)
 
-df <- read.csv("../data/elv5.csv")
+df <- read.csv("../data/elv50.csv")
 library(tidyr)
 library(dplyr)
 
-df_long <- df %>%
-  pivot_longer(
-    cols = starts_with("α_"),
-    names_to = "Target_Species",
-    names_prefix = "α_",
-    values_to = "Alpha_ij"
-  )
-
-df_clean <- df_long %>% drop_na()
-df_select <- df_long %>% filter(CUE > 0 )
+df_clean <- df %>% drop_na()
+df_select <- df %>% filter(Abundance > 1e-5 )
 
 for (community in unique(df_select$Community)) {
   df_sub <- df_select %>% filter(Community == community)
