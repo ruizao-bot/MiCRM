@@ -9,41 +9,42 @@ library(patchwork)
 
 df <- read.csv("../data/coal_recursive_hpc.csv")
 
-df_long <- df %>%
-  pivot_longer(
-    cols = matches("^(RelAbun|CUE|Abundance)_Comm\\d+_Sp\\d+"),
-    names_to = c(".value", "Community", "Species"),
-    names_pattern = "(RelAbun|CUE|Abundance)_Comm(\\d+)_Sp(\\d+)"
-  ) %>%
-  mutate(
-    Community = paste0("Community ", Community),
-    Species = paste0("Species ", Species),
-    Community.CUE = case_when(
-      Community == "Community 1" ~ Community.CUE.1,
-      Community == "Community 2" ~ Community.CUE.2,
-      Community == "Community 3" ~ Community.CUE.3
-    )
-  )
 df_select <- df %>%
   mutate(Status = ifelse(Abundance < 1e-5, "Extinction", "Survival"))
 df_surv <- df_select %>%
   filter(Abundance > 1e-5)
 # standrdise species number
-species_counts <- df_select %>%
-  group_by(Community) %>%
-  summarise(SpeciesCount = n_distinct(Species_ID))
-############ Density of relative abundance ################
-df_surv <- df_select %>% filter(Status == "Survival")
+species_counts <- df_surv %>%
+  distinct(Seed, Community, Species_ID) %>%  # 每个种群中独立物种去重
+  group_by(Seed, Community) %>%
+  summarise(SpeciesCount = n(), .groups = "drop")
 
+############ Density of relative abundance ################
 #ggplot(df_surv, aes(x = Abundance, fill = Community)) +
 #  geom_histogram(binwidth = 0.01, position = "identity", alpha = 0.3) +
 #  geom_line(data = df_line, aes(x = bin_mid, y = count, color = Community), size = 1.2) +
 #  theme_minimal() +
 #  labs(x = "Abundance", y = "Frequency (Samples)") +
-#  scale_fill_manual(values = c("red", "green", "blue")) +
-#  scale_color_manual(values = c("red", "green", "blue"))
+#  scale_fill_manual(values = c("red", "chartreuse3", "blue")) +
+#  scale_color_manual(values = c("red", "chartreuse3", "blue"))
 
 ##### frequency #########
+df_sad <- df_surv %>%
+  group_by(Community) %>%
+  mutate(RelAbund = Abundance / sum(Abundance)) %>%
+  ungroup()
+
+ggplot(df_sad, aes(x = RelAbund, fill = factor(Community), color = factor(Community))) +
+  geom_histogram(position = "identity", alpha = 0.3, bins = 50) +
+  scale_x_log10() +
+  theme_minimal() +
+  labs(x = "Relative Abundance (log-scaled axis)",
+       y = "Frequency (Histogram) / Density (Curve)",
+       fill = "Community", color = "Community") +
+  scale_fill_manual(values = c("red", "chartreuse3", "blue")) +
+  scale_color_manual(values = c("red", "chartreuse3", "blue"))
+
+
 ggplot(df_surv, 
        aes(x = Abundance, fill = factor(Community), color = factor(Community))) +
   geom_histogram(position = "identity", alpha = 0.3, bins = 50) +
@@ -52,8 +53,8 @@ ggplot(df_surv,
   labs(title = "",
        x = "Abundance (log-scaled axis)", y = "Frequency",
        fill = "Community", color = "Community") +
-  scale_fill_manual(values = c("red", "green", "blue")) +
-  scale_color_manual(values = c("red", "green", "blue"))
+  scale_fill_manual(values = c("red", "chartreuse3", "blue")) +
+  scale_color_manual(values = c("red", "chartreuse3", "blue"))
 ##### kernel density #########
 ggplot(df_surv, aes(x = Abundance, fill = factor(Community), color = factor(Community))) +
   geom_density(alpha = 0.4, adjust = 1.5) +
@@ -77,8 +78,8 @@ ggplot(df_surv,
   labs(title = "",
        x = "CUE", y = "Frequency",
        fill = "Community", color = "Community") +
-  scale_fill_manual(values = c("red", "green", "blue")) +
-  scale_color_manual(values = c("red", "green", "blue"))
+  scale_fill_manual(values = c("red", "#2ca02c", "blue")) +
+  scale_color_manual(values = c("red", "#2ca02c", "blue"))
 
 # Survival
 df_ext <- df_select %>%
@@ -93,55 +94,71 @@ ggplot(df_ext, aes(x = factor(Community), y = Species_CUE, fill = StatusGroup)) 
   scale_fill_manual(values = c(
     "Extinction" = "grey60",
     "Survival_1" = "red",  # red
-    "Survival_2" = "green",  # green
+    "Survival_2" = "chartreuse3",  # chartreuse3
     "Survival_3" = "blue"   # blue
   )) +
   scale_color_manual(values = c(
     "Extinction" = "grey60",
     "Survival_1" = "red",
-    "Survival_2" = "green",
+    "Survival_2" = "chartreuse3",
     "Survival_3" = "blue"
   )) +
   labs(x = "Community", y = "CUE", fill = "Status", color = "Status") +
   theme_minimal()
-########### linear regression between CUE and abundance#######
+########### nls between CUE and abundance#######
+communities <- unique(df_surv$Community)
+fit_summary <- data.frame()
 fit_lines <- data.frame()
 
-for (comm in unique(df_surv$Community)) {
-  # 用 df_surv 中当前群落的数据
-  model <- lm(log10(Abundance) ~ Species_CUE,
-              data = df_surv %>% filter(Community == comm, Abundance > 1e-5))
+for (comm in communities) {
+  dat <- df_surv %>% filter(Community == comm)
+  if (nrow(dat) < 10) next 
+
+  nls_mod <- tryCatch({
+    nlsLM(Abundance ~ K / (1 + exp(-r * (Species_CUE - x0))),
+          data = dat,
+          start = list(K = max(dat$Abundance), r = 5, x0 = median(dat$Species_CUE)),
+          control = nls.control(maxiter = 200, warnOnly = TRUE))
+  }, error = function(e) NULL)
   
-  # 打印模型摘要
-  cat("=== Summary for Community", comm, "===\n")
-  print(summary(model))
-  cat("\n")
-  
-  # 用当前群落生成预测线
-  cue_seq <- seq(
-    min(df_surv$Species_CUE[df_surv$Community == comm & df_surv$Abundance > 1e-5]),
-    max(df_surv$Species_CUE[df_surv$Community == comm & df_surv$Abundance > 1e-5]),
-    length.out = 200
-  )
-  
-  pred <- data.frame(
-    Species_CUE = cue_seq,
-    log_Abundance = predict(model, newdata = data.frame(Species_CUE = cue_seq)),
-    Community = as.factor(comm)
-  )
-  
-  fit_lines <- bind_rows(fit_lines, pred)
+  if (!is.null(nls_mod)) {
+    # 计算 R² 和 AIC
+    y <- dat$Abundance
+    yhat <- predict(nls_mod)
+    rss <- sum((y - yhat)^2)
+    tss <- sum((y - mean(y))^2)
+    pseudo_r2 <- 1 - rss / tss
+    aic_val <- AIC(nls_mod)
+    
+    fit_summary <- bind_rows(fit_summary, data.frame(
+      Community = comm,
+      AIC = aic_val,
+      R2 = pseudo_r2
+    ))
+    cue_seq <- seq(min(dat$Species_CUE), max(dat$Species_CUE), length.out = 200)
+    fit_lines <- bind_rows(fit_lines, data.frame(
+      Species_CUE = cue_seq,
+      Abundance = predict(nls_mod, newdata = data.frame(Species_CUE = cue_seq)),
+      Community = comm
+    ))
+  }
 }
 
-ggplot(df_surv %>% filter(Abundance > 1e-5), aes(x = Species_CUE, y = log10(Abundance + 1e-8), color = factor(Community))) +
-  geom_point(alpha = 0.7, size = 2) +
-  geom_line(data = fit_lines, aes(x = Species_CUE, y = log_Abundance, color = factor(Community)), size = 1.2) +
+ggplot(df_surv, aes(x = Species_CUE, y = Abundance)) +
+  geom_point(aes(color = factor(Community)), alpha = 0.4) +
+  geom_line(data = fit_lines, aes(x = Species_CUE, y = Abundance, color = factor(Community)), size = 1.2) +
+  facet_wrap(~ Community, scales = "free_x") +
+  scale_color_manual(
+    values = c("1" = "red", "2" = "#2ca02c", "3" = "blue")
+  ) +
   theme_minimal() +
   labs(
-    x = "CUE",
-    y = "log10(Abundance)",
+    title = "",
+    x = "Species-level CUE",
+    y = "Abundance",
     color = "Community"
-  ) 
+  )
+
 ########################### logistic #####################################
 library(minpack.lm)
 library(dplyr)
@@ -187,7 +204,6 @@ ggplot(df_surv, aes(x = Species_CUE, y = Abundance, color = factor(Community)) )
     y = "Abundance",
     color = "Community"
   )
-
 ########## richness and species CUE Variance############
 df_stats <- df_surv%>%
   group_by(Seed, Community, Community_CUE) %>%
@@ -204,9 +220,9 @@ ggplot(df_stats, aes(x = CUE.Var, y = Richness, color = factor(Community))) +
   labs(x = "CUE Variation", y = "Species Richness") +
   theme_minimal()+
   labs(title = "",
-       x = "Abundance (log-scaled axis)", y = "Frequency") +
-  scale_fill_manual(values = c("red", "green", "blue")) +
-  scale_color_manual(values = c("red", "green", "blue"))
+       x = "CUE Variation", y = "Species Richness") +
+  scale_fill_manual(values = c("red", "#2ca02c", "blue")) +
+  scale_color_manual(values = c("red", "#2ca02c", "blue"))
 
 
 for (comm in c(1, 2,3)) {
@@ -214,8 +230,73 @@ for (comm in c(1, 2,3)) {
   cat("\n---", comm, "---\n")
   print(summary(model_var))
 }
-############## Survival ##################
+############## Similarity ##################
+library(vegan)
+library(tibble)
+df_mut <- df_surv %>%
+  mutate(Global_Species_ID = case_when(
+    Community == 2 ~ Species_ID + 100,
+    TRUE ~ Species_ID
+  ))
+
+bray_results <- data.frame()
+
+for (s in unique(df_mut$Seed)) {
+  df_seed <- df_mut %>% filter(Seed == s) %>% as.data.frame()
+  if (!all(c(1, 2, 3) %in% unique(df_seed$Community))) next
+  
+  comm_mat <- df_seed %>%
+    select(Community, Global_Species_ID, Abundance) %>%
+    pivot_wider(
+      names_from = Global_Species_ID,
+      values_from = Abundance,
+      values_fill = list(Abundance = 0)
+    )
+  rownames(comm_mat) <- comm_mat$Community
+  comm_mat$Community <- NULL
+  if (nrow(comm_mat) != 3) next
+  
+  bc <- vegdist(comm_mat, method = "bray")
+  bc_mat <- as.matrix(bc)
+  if (!all(c("3", "1", "2") %in% rownames(bc_mat))) next
+  
+  d31 <- bc_mat["3", "1"]
+  d32 <- bc_mat["3", "2"]
+  cue1 <- unique(df_seed$Community_CUE[df_seed$Community == 1])
+  cue2 <- unique(df_seed$Community_CUE[df_seed$Community == 2])
+  
+  bray_results <- rbind(bray_results, data.frame(
+    Seed = s,
+    Bray_3vs1 = d31,
+    Bray_3vs2 = d32,
+    CUE_1 = cue1,
+    CUE_2 = cue2,
+    Sim_3vs1 = 1 - d31,
+    Sim_3vs2 = 1 - d32
+  ))
+  
+}
+# 拟合线性模型
+mod_1 <- lm(Sim_3vs1 ~ CUE_1, data = bray_results)
+mod_2 <- lm(Sim_3vs2 ~ CUE_2, data = bray_results)
+
+# 输出摘要
+summary(mod_1)
+summary(mod_2)
 
 
-
+ggplot() +
+  geom_point(data = bray_results, aes(x = CUE_1, y = Sim_3vs1), color = "red", alpha = 1, size = 2) +
+  geom_smooth(data = bray_results, aes(x = CUE_1, y = Sim_3vs1), method = "lm", se = FALSE, color = "red") +
+  
+  geom_point(data = bray_results, aes(x = CUE_2, y = Sim_3vs2), color = "#2ca02c", alpha = 1, size = 2) +
+  geom_smooth(data = bray_results, aes(x = CUE_2, y = Sim_3vs2), method = "lm", se = FALSE, color = "#2ca02c") +
+  
+  labs(
+    x = "Community CUE",
+    y = "Bray–Curtis similarity to Community 3",
+    title = "",
+    color = "Community"
+  ) +
+  theme_minimal(base_size = 14)
 

@@ -32,10 +32,11 @@ df_pred <- data.frame(
 )
 
 ggplot(df_comm, aes(x = Community_CUE, y = Dominance, color = factor(Community))) +
-  geom_jitter(width = 0.0005, height = 0.05, alpha = 0.6, size = 2) +
+  geom_jitter(width = 0.0005, height = 0.05, alpha = 1, size = 2) +
   geom_line(data = df_pred, aes(x = Community_CUE, y = Probability), 
-            color = "black", linewidth = 1.2, inherit.aes = FALSE) +
-  labs(title = "Logistic Regression",
+            color = "grey", linewidth = 1, alpha = 1, inherit.aes = FALSE) +
+  scale_color_manual(values = c("1" = "red", "2" = "#2ca02c")) +
+  labs(title = "",
        x = "CUE Value",
        y = "Probability of Dominance (1 = Dominant)",
        color = "Community") +

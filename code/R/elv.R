@@ -5,7 +5,7 @@ library(tidyr)
 library(dplyr)
 library(stringr)
 
-df <- read.csv("../data/elv50.csv")
+df <- read.csv("../data/elv_hpc.csv")
 library(tidyr)
 library(dplyr)
 
@@ -28,8 +28,8 @@ ggplot(df_select, aes(x = CUE, y = r)) +
        y = "Growth Rate (r)") +
   theme_minimal()
 
-ggplot(df, aes(x = factor(Community), y = CUE)) +
-  geom_boxplot(fill = "skyblue") +
+ggplot(df_surv, aes(x = factor(Community), y = CUE)) +
+  geom_boxplot(fill = factor(Community)) +
   labs(title = "CUE by Community",
        x = "Community", y = "CUE") +
   theme_minimal()

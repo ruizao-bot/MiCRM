@@ -14,19 +14,41 @@ ggplot(df, aes(x = CUE, y = Max_Growth_Rate)) +
        y = "Growth Rate (r)") +
   theme_minimal()
 
-ggplot(df, aes(x = factor(Community), y = CUE, fill = Community)) +
-  geom_boxplot() +
+ggplot(df, 
+       aes(x = CUE, fill = factor(Community), color = factor(Community))) +
+  geom_histogram(position = "identity", alpha = 0.3, bins = 50) +
+  theme_minimal() +
+  scale_x_log10() +
   labs(title = "",
-       x = "Community", y = "CUE") +
-  theme_minimal()
+       x = "CUE", y = "Frequency",
+       fill = "Community", color = "Community") +
+  scale_fill_manual(values = c("red", "#2ca02c", "blue")) +
+  scale_color_manual(values = c("red", "#2ca02c", "blue"))
 
-ggplot(df, aes(x = Status, y = CUE, fill = Status)) +
-  geom_boxplot() +
-  facet_wrap(~ Community) +
-  labs(title = "CUE by Survival Status in Each Community",
-       x = "Status", y = "CUE") +
-  theme_minimal()
 
+df_ext <- df %>%
+  mutate(StatusGroup = ifelse(Status == "Extinction", "Extinction",
+                              paste0("Survival_", Community)))
+
+ggplot(df_ext, aes(x = factor(Community), y = CUE, fill = StatusGroup)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.3, position = position_dodge(width = 0.8)) +  
+  geom_jitter(aes(color = StatusGroup), 
+              position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.8),
+              size = 0.1, alpha = 0.3) +
+  scale_fill_manual(values = c(
+    "Extinction" = "grey60",
+    "Survival_1" = "red",  # red
+    "Survival_2" = "chartreuse3",  # chartreuse3
+    "Survival_3" = "blue"   # blue
+  )) +
+  scale_color_manual(values = c(
+    "Extinction" = "grey60",
+    "Survival_1" = "red",
+    "Survival_2" = "chartreuse3",
+    "Survival_3" = "blue"
+  )) +
+  labs(x = "Community", y = "CUE", fill = "Status", color = "Status") +
+  theme_minimal()
 #### abundance and frequnecy####
 
 df_line <- df_surv %>%

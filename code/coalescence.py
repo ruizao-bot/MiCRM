@@ -86,7 +86,7 @@ N3 = N1 + N2
 M3 = len(resource_indices3)
 rho3 = rho_pool[resource_indices3]
 C0_3 = np.concatenate([ce1, ce2])
-R0_3 = re1 + re2
+R0_3 = np.full(M1, 1) #re1 + re2
 sol3 = param.solve_micrm(N3, M3, u3, l3, m3, lambda_alpha3, rho3, omega3, C0_3, R0_3)
 #############################################
 # Plot biomass change over time
@@ -154,9 +154,8 @@ for i in range(num_communities):
             "C_final": C_final[j],
             "Max_Growth_Rate": max_growth_rates[j]
         })
-"""
+
 df_out = pd.DataFrame(data_to_save)
-df_out.to_csv("data/coal_single.csv", index=False)
-"""
+df_out.to_csv("../data/coal_single.csv", index=False)
 
 
