@@ -60,15 +60,17 @@ t_span = (0, 600)
 t_eval = np.linspace(*t_span, 300)
 
 # Simulate Community 1
-C0 = np.full(N1, 0.01)  # Initial consumer abundance
-R0 = np.full(M1, 1)        # Initial resource abundance
-
-sol1 = param.solve_micrm(N1, M1, u1, l1, m1, lambda_alpha1, rho1, omega1)
+C0_1 = np.full(N1, 0.01)  # Initial consumer abundance
+C0_2 = np.full(N1, 0.01) 
+#R0 = np.full(M1, 1)        # Initial resource abundance
+R0_1 = np.full(M1, 1)
+R0_2 = np.full(M2, 1)
+sol1 = param.solve_micrm(N1, M1, u1, l1, m1, lambda_alpha1, rho1, omega1, C0_1, R0_1)
 ce1 = sol1.y[:N1, -1]  # Consumer abundance at equilibrium
 re1 = sol1.y[N1:, -1]  # Resource abundance at equilibrium
 
 # Simulate Community 2
-sol2 = param.solve_micrm(N2, M2, u2, l2, m2, lambda_alpha2, rho2, omega2)
+sol2 = param.solve_micrm(N2, M2, u2, l2, m2, lambda_alpha2, rho2, omega2, C0_2,  R0_2)
 ce2 = sol2.y[:N2, -1]
 re2 = sol2.y[N2:, -1]
 
@@ -85,12 +87,13 @@ omega3 = omega_pool[resource_indices3]
 N3 = N1 + N2
 M3 = len(resource_indices3)
 rho3 = rho_pool[resource_indices3]
-C0_3 = np.concatenate([ce1, ce2])
-R0_3 = np.full(M1, 1) #re1 + re2
+C0_3 = np.concatenate([ce1, ce2*0.1])
+R0_3 = re1 + re2
+
 sol3 = param.solve_micrm(N3, M3, u3, l3, m3, lambda_alpha3, rho3, omega3, C0_3, R0_3)
 #############################################
 # Plot biomass change over time
-fig, axes = plt.subplots(1, 3, figsize=(18, 5), sharey=True)
+fig, axes = plt.subplots(1, 3, figsize=(20, 8), sharey=True)
 # Plot for Community 1
 cmap1 = plt.get_cmap("Blues")
 for i, idx in enumerate(species_indices1):
@@ -118,13 +121,13 @@ axes[2].set_xlabel('Time')
 axes[2].grid(True)
 axes[2].legend(loc='upper right', fontsize='small', ncol=2)
 plt.tight_layout(rect=[0, 0, 0.85, 1])  # leaves space on the right for legends
-
 plt.show()
 ###### compare the community CUE between survival and extinction######
 sol_list = [sol1, sol2, sol3]
 N_list = [N1, N2, N3]
 u_list = [u1, u2, u3]
-R0_list = [R0, R0, R0_3]
+R0_list = [R0_1, R0_2, R0_3]
+
 l_list = [l1, l2, l3]
 m_list = [m1, m2, m3]
 M_list = [M1, M2, M3]
@@ -136,8 +139,6 @@ for i in range(num_communities):
     C_final = np.array(sol_list[i].y[:, -1])
     t = sol_list[i].t
     C_all = sol_list[i].y[:N_list[i], :]
-    dCdt_all = np.gradient(C_all, t, axis=1)
-    max_growth_rates = np.max(dCdt_all, axis=1)
 
     _, species_CUE = CUE.compute_community_CUE2(
         sol_list[i], N_list[i], u_list[i], R0_list[i], l_list[i], m_list[i]
@@ -145,17 +146,16 @@ for i in range(num_communities):
     species_CUE = np.array(species_CUE, dtype=float)
 
     for j in range(N_list[i]):
-        status = "Survival" if C_final[j] >= 0.01 else "Extinction"
+        status = "Survival" if C_final[j] >= 1e-5 else "Extinction"
         data_to_save.append({
             "Community": i + 1,
             "Species": f"Sp{j+1}",
             "Status": status,
             "CUE": species_CUE[j],
             "C_final": C_final[j],
-            "Max_Growth_Rate": max_growth_rates[j]
         })
 
 df_out = pd.DataFrame(data_to_save)
-df_out.to_csv("../data/coal_single.csv", index=False)
+# df_out.to_csv("../data/coal_single.csv", index=False)
 
 

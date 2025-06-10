@@ -19,7 +19,7 @@ def fix_alpha_string(s):
         return "[" + s + "]"
     return s
 
-def build_network(df, comm_prefix, seed=None, quantile=0.7, cfinal_threshold=1e-6):
+def build_network(df, comm_prefix, seed=None, quantile=0.7):
     # Get all alpha columns for the given community
     alpha_cols = [col for col in df.columns if col.startswith(f"alpha_{comm_prefix}")]
     # Extract all species IDs (from column names like 'alpha_CommX_SpY')
@@ -36,13 +36,7 @@ def build_network(df, comm_prefix, seed=None, quantile=0.7, cfinal_threshold=1e-
     
     # Filter species based on Cfinal threshold
     # Only include species whose Cfinal value is greater than cfinal_threshold
-    species_ids = []
-    for sp in all_species_ids:
-        # Use .get() to return 0 if the column is missing
-        cfinal_value = random_row.get(f"Cfinal_{comm_prefix}_Sp{sp}", 0)
-        if cfinal_value > cfinal_threshold:
-            species_ids.append(sp)
-    
+    species_ids = all_species_ids
     # Extract CUE values for the filtered species
     cue_vals = {sp: random_row[f"CUE_{comm_prefix}_Sp{sp}"] for sp in species_ids}
     
@@ -223,6 +217,37 @@ def compute_inverse_weight_betweenness(G):
         distance = 1.0 / (strength + 1e-10)
         d['weight'] = distance
     return nx.betweenness_centrality(G_inv, weight='weight', normalized=True)
+
+def extract_cue_and_degree(df, comm, seed, degree_weighted=False, degree_threshold=0.0):
+
+    # 提取对应行
+    row = df[df["Seed"] == seed]
+    if row.empty:
+        return np.array([]), np.array([])
+
+    row = row.iloc[0]
+    G = build_network(df, comm, seed=seed)
+    if G is None:
+        return np.array([]), np.array([])
+
+    cue_list = []
+    degree_list = []
+
+    for n in G.nodes():
+        sp_id = str(n)
+
+        # 提取 cue
+        cue_col = f"CUE_{comm}_Sp{sp_id}"
+        cue_val = row.get(cue_col, np.nan)
+
+        # 计算 degree
+        deg_val = G.degree(n, weight='weight' if degree_weighted else None)
+        if deg_val > degree_threshold:
+            cue_list.append(cue_val)
+            degree_list.append(deg_val)
+
+    return np.array(cue_list), np.array(degree_list)
+
 def compute_all_betweenness(df, comm_prefix, seed_range):
     """
     For each replicate (seed), compute betweenness centrality for all nodes
@@ -279,14 +304,15 @@ def summarize_community_CUE_pathlength(df, comm_prefix):
             cue = np.array([row[col] for col in cue_cols])
             cfinal = np.array([row[col] for col in cfinal_cols])
             alpha_matrix = np.stack([np.array(ast.literal_eval(fix_alpha_string(row[col]))) for col in alpha_cols])
+
             total_abundance = np.sum(cfinal)
             comm_cue = np.sum(cue * cfinal) / total_abundance if total_abundance > 0 else np.nan
 
             G = nx.Graph()
-            for i in range(len(species_ids)):
+            for i in range(len(cue)):
                 G.add_node(i)
-            for i in range(len(species_ids)):
-                for j in range(i + 1, len(species_ids)):
+            for i in range(len(cue)):
+                for j in range(i + 1, len(cue)):
                     strength = (abs(alpha_matrix[i][j]) + abs(alpha_matrix[j][i])) / 2
                     if strength > 0:
                         G.add_edge(i, j, weight=strength)
@@ -294,7 +320,7 @@ def summarize_community_CUE_pathlength(df, comm_prefix):
             # 倒数加权路径长度
             G_inv = G.copy()
             for u, v, d in G_inv.edges(data=True):
-                d['weight'] = 1.0 / (d['weight'] + 1e-8)
+                d['weight'] = 1.0 / (d['weight'] + 1e-10)
             if nx.is_connected(G_inv):
                 avg_path = nx.average_shortest_path_length(G_inv, weight='weight')
             else:
@@ -338,7 +364,7 @@ def analyze_gengamma_fit(df, comm_prefix, seed=None):
     cue = cue[mask]
     degree = degree[mask]
 
-    if len(degree) < 5 or np.all(degree < 1e-5):
+    if len(degree) < 5:
         return None
 
     for attempt in range(3):
@@ -407,9 +433,34 @@ seed = 52
 for i, comm in enumerate(comms):
     G = build_network(df, comm, seed=seed)
     plot_network(G, f"Network of {comm}")
-    result = analyze_gengamma_fit(df, comm, seed=seed)
-    plot_gengamma_fit(result, f"{comm} (seed {seed})", colors[i])
 
+communities = ["Comm1", "Comm2", "Comm3"]
+colors = ["red", "green", "blue"]
+seed = 51  # 指定种子
+
+fig, axes = plt.subplots(1, 3, figsize=(15, 4), sharey=True)
+
+for i, comm in enumerate(communities):
+    cue, degree = extract_cue_and_degree(
+        df, comm, seed=seed,
+        degree_weighted=True,
+        degree_threshold=0.01
+    )
+
+    ax = axes[i]
+    if len(cue) == 0:
+        ax.set_title(f"{comm} (no data)")
+        ax.axis("off")
+        continue
+
+    ax.scatter(cue, degree, color=colors[i], s=10, alpha=0.5)
+    ax.set_title(comm)
+    ax.set_xlabel("CUE")
+    if i == 0:
+        ax.set_ylabel("Degree Centrality")
+
+plt.tight_layout(rect=[0, 0, 1, 0.93])
+plt.show()
 # plot_CUE_vs_interaction(df)
 # plot_CUE_vs_pathlength(df)
 
@@ -500,6 +551,58 @@ axes[0].set_ylabel("log10(Frequency)")
 plt.tight_layout(rect=[0, 0, 1, 0.95])
 plt.show()
 # %%
+import matplotlib.pyplot as plt
+import numpy as np
+from collections import defaultdict
+
+colors = ["red", "green", "blue"]
+communities = ["Comm1", "Comm2", "Comm3"]
+seed_range = range(51, 101)
+
+fig, axes = plt.subplots(1, 3, figsize=(15, 4), sharey=True)
+
+for i, comm in enumerate(communities):
+    cue_all = []
+    bw_all = []
+
+    for seed in seed_range:
+        G = build_network(df, comm, seed=seed)
+        if G is None:
+            continue
+
+        bw_dict = compute_inverse_weight_betweenness(G)
+
+        row = df[df["Seed"] == seed]
+        if row.empty:
+            continue
+        row = row.iloc[0]
+
+        for node in G.nodes():
+            sp_id = str(node)
+
+            # 不再筛选 Cfinal
+            cue = row.get(f"CUE_{comm}_Sp{sp_id}", np.nan)
+            bw = bw_dict.get(node, np.nan)
+
+            if not np.isnan(cue) and not np.isnan(bw):
+                cue_all.append(cue)
+                bw_all.append(bw)
+
+    cue_all = np.array(cue_all)
+    bw_all = np.array(bw_all)
+
+    ax = axes[i]
+    ax.scatter(cue_all, bw_all, color=colors[i], alpha=0.5, s=10)
+    ax.set_title(comm)
+    ax.set_xlabel("CUE")
+    if i == 0:
+        ax.set_ylabel("Betweenness Centrality")
+
+plt.suptitle("CUE vs Betweenness Centrality (Species Level)", fontsize=14)
+plt.tight_layout(rect=[0, 0, 1, 0.93])
+plt.show()
+
+# %%
 # Betweenness
 from collections import defaultdict
 
@@ -512,30 +615,27 @@ for comm in ["Comm1", "Comm2", "Comm3"]:
         bws = compute_inverse_weight_betweenness(G)
         all_betweenness[comm].extend(list(bws.values()))
 
-colors = ["red", "green", "blue"]
-communities = ["Comm1", "Comm2", "Comm3"]
-
 fig, axes = plt.subplots(1, 3, figsize=(15, 4), sharey=True)
-
 for i, comm in enumerate(communities):
     values = np.array(all_betweenness[comm])
     bins = 30
     counts, bin_edges = np.histogram(values, bins=bins)
     bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
-    
+    log_counts = np.where(counts > 0, np.log10(counts), np.nan)
+
     ax = axes[i]
-    ax.plot(bin_centers, counts, marker='o', linestyle='-', color=colors[i])
+    ax.plot(bin_centers, log_counts, marker='o', linestyle='-', color=colors[i])
     ax.set_xlabel("Betweenness")
     ax.set_title(comm)
-    ax.set_yscale("log")
     if i == 0:
-        ax.set_ylabel("Frequency (log scale)")
+        ax.set_ylabel("log10(Frequency)")
 
 plt.tight_layout(rect=[0, 0, 1, 0.95])
 plt.show()
+
 # %%
 # interaction strength for each species
-def compute_bidirectional_strengths(df, comm_prefix, seed_range, cfinal_threshold=1e-5):
+def compute_bidirectional_strengths(df, comm_prefix, seed_range):
     all_strengths = []
 
     for seed in seed_range:
@@ -548,18 +648,14 @@ def compute_bidirectional_strengths(df, comm_prefix, seed_range, cfinal_threshol
         alpha_cols = [col for col in df.columns if col.startswith(f"alpha_{comm_prefix}_Sp")]
         all_species_ids = sorted([int(col.split("_Sp")[-1]) for col in alpha_cols])
 
-        # 根据 Cfinal 过滤保留的物种
-        species_ids = []
-        for sp in all_species_ids:
-            cval = row.get(f"Cfinal_{comm_prefix}_Sp{sp}", 0)
-            if cval > cfinal_threshold:
-                species_ids.append(sp)
+        # 不再筛选 Cfinal，直接使用所有物种
+        species_ids = all_species_ids
 
         S = len(species_ids)
         if S < 2:
             continue  # 物种太少跳过
 
-        # 构建 alpha 矩阵（只包含筛选后物种之间的相互作用）
+        # 构建 alpha 矩阵（所有物种之间的相互作用）
         alpha_matrix = np.zeros((S, S))
         for i, sp_i in enumerate(species_ids):
             try:
@@ -570,7 +666,6 @@ def compute_bidirectional_strengths(df, comm_prefix, seed_range, cfinal_threshol
                 else:
                     alpha_vec = raw
 
-                # 获取该向量中对应筛选物种的位置
                 selected_indices = [all_species_ids.index(sp_j) for sp_j in species_ids]
                 filtered_vec = np.array(alpha_vec)[selected_indices]
 
@@ -785,9 +880,10 @@ for i, comm in enumerate(communities):
             sp_id = col.split("_Sp")[-1]
             cfinal_col = f"Cfinal_{comm}_Sp{sp_id}"
             cfinal = row.get(cfinal_col, 0)
-            if cfinal > 1e-5:
-                cue = row.get(col, np.nan)
+            cue = row.get(col, np.nan)
+            if not np.isnan(cue): 
                 cues.append(cue)
+
 
     strengths = np.array(strengths)
     cues = np.array(cues)
@@ -818,7 +914,6 @@ for i, comm in enumerate(communities):
         ax.set_ylabel("Interaction Strength")
     ax.legend()
 
-plt.suptitle("CUE vs Interaction Strength (Species Level)", fontsize=14)
 plt.tight_layout(rect=[0, 0, 1, 0.95])
 plt.show()
 

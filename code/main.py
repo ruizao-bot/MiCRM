@@ -5,8 +5,8 @@ import param
 
 
 # parameters
-N = 100  # consumer number
-M = 50  # resource number
+N = 10  # consumer number
+M = 5  # resource number
 λ = 0.3  # total leakage rate
 λ_u = np.ones(N)
 
@@ -22,9 +22,9 @@ row_sums = np.sum(u, axis=1)
 lambda_alpha = np.full(M, λ)  # total leakage rate for each resource
 
 
-m = np.full(N, 0.1)  # mortality rate of N consumers
-rho = np.full(M, 1)  # input of M resources
-omega = np.full(M, 1)  # decay rate of M resources
+m = np.full(N, 0.2)  # mortality rate of N consumers
+rho = np.full(M, 0.6)  # input of M resources
+omega = np.full(M, 0.1)  # decay rate of M resources
 
 l = param.generate_l_tensor(N, M, N_modules, s_ratio, λ) # a tensor for all consumers' leakage matrics
 
@@ -47,7 +47,7 @@ def dCdt_Rdt(t, y):
     return np.concatenate([dCdt, dRdt])
 
 # intial value
-C0 = np.full(N,1)  # consumer
+C0 = np.full(N,0.01)  # consumer
 R0 = np.full(M,1)   # resource
 Y0 = np.concatenate([C0, R0])
 

@@ -66,7 +66,7 @@ def generate_l_tensor(N, M, N_modules, s_ratio, λ):
 
 
 def solve_micrm(N, M, u, l, m, lambda_alpha, rho, omega, 
-                C0=None, R0=None, t_span=None, t_eval=None):
+                C0, R0, t_span=None, t_eval=None):
     """
     Solve the MiCRM (Microbial Consumer Resource Model) ODE system.
 
