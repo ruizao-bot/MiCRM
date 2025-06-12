@@ -10,6 +10,7 @@ df_long <- pivot_longer(df,
 df_long$Community <- gsub("Community\\.CUE\\.", "Community ", df_long$Community)
 
 ggplot(df_long, aes(x = Community, y = CUE, fill = Community)) +
+<<<<<<< HEAD
   geom_boxplot(alpha = 0.4, outlier.shape = NA) + 
   geom_jitter(aes(fill = Community), color = "black", shape = 21, 
               size = 2.5, width = 0.15, alpha = 0.8) +  
@@ -23,3 +24,12 @@ ggplot(df_long, aes(x = Community, y = CUE, fill = Community)) +
   theme(legend.position = "none")
 
 
+=======
+  geom_boxplot() +
+  labs(xlab("Community"),
+       ylab("CUE") ,
+       color = "Community Type")
+  theme_minimal() +
+  theme(legend.position = "none")
+  
+>>>>>>> origin/main

@@ -84,6 +84,10 @@ ggplot(df_growth_rate, aes(x = Community, y = r, fill = Community)) +
        ylab("Growth rate (r)") ,
        color = "Community Type")
   theme_minimal() +
+<<<<<<< HEAD
   theme(legend.position = "none")
   
   
+=======
+  theme(legend.position = "none")
+>>>>>>> origin/main
