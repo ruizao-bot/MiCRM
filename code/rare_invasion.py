@@ -7,6 +7,7 @@ import CUE
 import pandas as pd
 from scipy.integrate import solve_ivp
 import matplotlib.pyplot as plt
+from scipy.stats import mannwhitneyu
 
 # Parameter settings
 np.random.seed(37)
@@ -87,7 +88,7 @@ omega3 = omega_pool[resource_indices3]
 N3 = N1 + N2
 M3 = len(resource_indices3)
 rho3 = rho_pool[resource_indices3]
-C0_3 = np.concatenate([ce1, ce2])
+C0_3 = np.concatenate([ce1, ce2*0.001])
 R0_3 = re1 + re2
 
 sol3 = param.solve_micrm(N3, M3, u3, l3, m3, lambda_alpha3, rho3, omega3, C0_3, R0_3)
@@ -134,28 +135,43 @@ M_list = [M1, M2, M3]
 num_communities = len(sol_list)
 
 data_to_save = []
-
 for i in range(num_communities):
     C_final = np.array(sol_list[i].y[:, -1])
-    t = sol_list[i].t
-    C_all = sol_list[i].y[:N_list[i], :]
-
-    _, species_CUE = CUE.compute_community_CUE2(
+    _, species_CUE = CUE.compute_CUE(
         sol_list[i], N_list[i], u_list[i], R0_list[i], l_list[i], m_list[i]
     )
-    species_CUE = np.array(species_CUE, dtype=float)
-
     for j in range(N_list[i]):
+        origin = (
+            "Resident" if (i == 2 and j < N1) else
+            "Invader" if (i == 2 and j >= N1) else
+            f"Community {i+1}"
+        )
         status = "Survival" if C_final[j] >= 1e-5 else "Extinction"
-        data_to_save.append({
-            "Community": i + 1,
-            "Species": f"Sp{j+1}",
-            "Status": status,
-            "CUE": species_CUE[j],
-            "C_final": C_final[j],
-        })
+        data_to_save.append([
+            i + 1, f"Sp{j+1}", origin, status, float(species_CUE[j]), float(C_final[j])
+        ])
 
-df_out = pd.DataFrame(data_to_save)
-# df_out.to_csv("../data/coal_single.csv", index=False)
+df_out = pd.DataFrame(data_to_save, columns=["Community", "Species", "Origin", "Status", "CUE", "C_final"])
 
+# Analysis
+merged = df_out[df_out["Community"] == 3]
+invaders = merged[merged["Origin"] == "Invader"]
+invader_survival_rate = (invaders["Status"] == "Survival").mean()
+print(f"Invader survival rate: {invader_survival_rate:.2%} ({invaders['Status'].value_counts().to_dict()})")
 
+survivors = invaders[invaders["Status"] == "Survival"]
+extinct = invaders[invaders["Status"] == "Extinction"]
+
+summary = merged.groupby(["Origin", "Status"]).size().unstack(fill_value=0)
+print(summary)
+
+from scipy.stats import mannwhitneyu
+if len(survivors) > 0 and len(extinct) > 0:
+    stat, p = mannwhitneyu(survivors["CUE"], extinct["CUE"], alternative="greater")
+    print(f"Mann-Whitney U test p-value: {p:.3g}")
+    plt.boxplot([survivors["CUE"], extinct["CUE"]], labels=["Survivors", "Extinct"])
+    plt.title("CUE of Invader Species (Rare Invasion)")
+    plt.ylabel("CUE")
+    plt.show()
+else:
+    print("Not enough survivors or extinct invaders for statistical test or plot.")

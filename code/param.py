@@ -113,7 +113,7 @@ def solve_micrm(N, M, u, l, m, lambda_alpha, rho, omega,
 
         return np.concatenate([dCdt, dRdt])
 
-    return solve_ivp(dCdt_Rdt, t_span, Y0, t_eval=t_eval)
+    return solve_ivp(dCdt_Rdt, t_span, Y0, t_eval=t_eval, method="BDF")
 
 
 def compute_alpha_r(C_hat, R_hat, N, M, u, l, m, lambda_alpha, omega):
@@ -140,5 +140,5 @@ def solve_elv(alpha, r, C0, t_span=(0, 600), t_eval=None):
             dCdt[i] = C[i] * (r[i] + sum(alpha[i, j] * C[j] for j in range(N)))
         return dCdt
 
-    sol = solve_ivp(dCdt_elv, t_span, C0, t_eval=t_eval)
+    sol = solve_ivp(dCdt_elv, t_span, C0, t_eval=t_eval, method="BDF")
     return sol
