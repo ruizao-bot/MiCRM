@@ -65,56 +65,58 @@ def generate_l_tensor(N, M, N_modules, s_ratio, λ):
     return l_tensor
 
 
-def solve_micrm(N, M, u, l, m, lambda_alpha, rho, omega, 
-                C0, R0, t_span=None, t_eval=None):
+def solve_micrm(
+    N, M, u, l, m, lambda_alpha, rho, omega, C0, R0,
+    t_span, t_eval=None, tol=1e-5, method='LSODA'
+):
     """
-    Solve the MiCRM (Microbial Consumer Resource Model) ODE system.
+    Integrate the MiCRM ODEs until equilibrium or t_span is reached.
 
     Parameters:
-        N, M             - Number of consumers and resources
-        u                - Uptake matrix (N x M)
-        l                - Leakage tensor (N x M x M)
-        m                - Maintenance costs (N,)
-        lambda_alpha     - Leakage fraction per resource (M,)
-        rho, omega       - Resource input and decay rates (M,)
-        C0, R0           - Optional initial conditions for C and R
-        t_span           - Time span for integration (tuple); default is (0, 600)
-        t_eval           - Time points to evaluate the solution (array)
+        N, M: int
+            Number of consumers and resources.
+        u, l, m, lambda_alpha, rho, omega: model parameters.
+        C0, R0: initial conditions for consumers and resources.
+        t_span: tuple
+            Time span for integration (default: (0, 1000)).
+        t_eval: array or None
+            Time points to evaluate solution (default: 300 points in t_span).
+        tol: float
+            Tolerance for equilibrium detection.
+        method: str
+            Integration method for solve_ivp.
 
     Returns:
-        sol              - Solution object from scipy.integrate.solve_ivp
+        sol: OdeResult
+            Solution object from scipy.integrate.solve_ivp.
     """
-    if t_span is None:
-        t_span = (0, 600)
-    if t_eval is None:
-        t_eval = np.linspace(t_span[0], t_span[1], 300)
-    if C0 is None:
-        C0 = np.full(N, 0.01)
-    if R0 is None:
-        R0 = np.full(M, 1.0)
-
-    Y0 = np.concatenate([C0, R0])
-
     def dCdt_Rdt(t, y):
         C = y[:N]
         R = y[N:]
-        dCdt = np.zeros(N)
-        dRdt = np.zeros(M)
-
-        # Consumer dynamics
-        for i in range(N):
-            dCdt[i] = sum(C[i] * R[α] * u[i, α] * (1 - lambda_alpha[α]) for α in range(M)) - C[i] * m[i]
-
-        # Resource dynamics
-        for α in range(M):
-            dRdt[α] = rho[α] - R[α] * omega[α]
-            dRdt[α] -= sum(C[i] * R[α] * u[i, α] for i in range(N))
-            dRdt[α] += sum(sum(C[i] * R[β] * u[i, β] * l[i, β, α] for β in range(M)) for i in range(N))
-
+        uptake = u * (R * (1 - lambda_alpha))  # (N, M)
+        dCdt = C * (np.sum(uptake, axis=1) - m)
+        dRdt = rho - omega * R
+        consumption = np.sum(C[:, None] * u * R, axis=0)  # (M,)
+        dRdt -= consumption
+        leakage = np.einsum('i,j,ij,ijk->k', C, R, u, l)
+        dRdt += leakage
         return np.concatenate([dCdt, dRdt])
 
-    return solve_ivp(dCdt_Rdt, t_span, Y0, t_eval=t_eval, method="BDF")
+    def equilibrium_event(t, y):
+        deriv = dCdt_Rdt(t, y)
+        return np.max(np.abs(deriv)) - tol
+    equilibrium_event.terminal = True
+    equilibrium_event.direction = -1
 
+    if t_eval is None:
+        t_eval = np.linspace(t_span[0], t_span[1], 300)
+    Y0 = np.concatenate([C0, R0])
+
+    sol = solve_ivp(
+        dCdt_Rdt, t_span, Y0, t_eval=t_eval, method=method,
+        events=equilibrium_event
+    )
+    return sol
 
 def compute_alpha_r(C_hat, R_hat, N, M, u, l, m, lambda_alpha, omega):
 
@@ -129,7 +131,7 @@ def compute_alpha_r(C_hat, R_hat, N, M, u, l, m, lambda_alpha, omega):
     return alpha, r
 
 
-def solve_elv(alpha, r, C0, t_span=(0, 600), t_eval=None):
+def solve_elv(alpha, r, C0, t_span=(0, 1000), t_eval=None):
     N = len(C0)
     if t_eval is None:
         t_eval = np.linspace(t_span[0], t_span[1], 300)
@@ -140,5 +142,5 @@ def solve_elv(alpha, r, C0, t_span=(0, 600), t_eval=None):
             dCdt[i] = C[i] * (r[i] + sum(alpha[i, j] * C[j] for j in range(N)))
         return dCdt
 
-    sol = solve_ivp(dCdt_elv, t_span, C0, t_eval=t_eval, method="BDF")
+    sol = solve_ivp(dCdt_elv, t_span, C0, t_eval=t_eval, method="RK45")
     return sol

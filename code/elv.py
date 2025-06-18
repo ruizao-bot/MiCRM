@@ -153,9 +153,9 @@ def store_elv_data(species_indices, community_id, r, CUE, C_hat):
     return pd.DataFrame(records)
 
 # --- Compute species-level CUEs for each community ---
-species_CUE1 = CUE.compute_community_CUE2(sol1, N1, u1, np.full(M1, 1.0), l1, m1)[1]
-species_CUE2 = CUE.compute_community_CUE2(sol2, N2, u2, np.full(M2, 1.0), l2, m2)[1]
-species_CUE3 = CUE.compute_community_CUE2(sol3, N3, u3, np.full(M3, 1.0), l3, m3)[1]
+species_CUE1 = CUE.compute_CUE(sol1, N1, u1, np.full(M1, 1.0), l1, m1)[1]
+species_CUE2 = CUE.compute_CUE(sol2, N2, u2, np.full(M2, 1.0), l2, m2)[1]
+species_CUE3 = CUE.compute_CUE(sol3, N3, u3, np.full(M3, 1.0), l3, m3)[1]
 
 # --- Build DataFrames for each community ---
 df1 = store_elv_data(species_indices1, 1, r1, species_CUE1, C_hat1)
@@ -270,7 +270,7 @@ def dCdt_elv(t, C):
 
 sol_elv = solve_ivp(dCdt_elv, t_span, C0, t_eval=t_eval)
 # CUE
-community_CUE, species_CUE = CUE.compute_community_CUE2(
+community_CUE, species_CUE = CUE.compute_CUE(
         sol_mcm, N, u, R0, l, m
     )
 
@@ -421,7 +421,7 @@ def dCdt_elv(t, C):
 
 
 sol_elv = solve_ivp(dCdt_elv, t_span, C0, t_eval=t_eval)
-community_CUE, species_CUE = CUE.compute_community_CUE2(
+community_CUE, species_CUE = CUE.compute_CUE(
         sol_mcm, N, u, R0, l_tensor, m
     )
 

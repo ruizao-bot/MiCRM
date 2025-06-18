@@ -1,6 +1,6 @@
 import numpy as np
 # Species CUE
-def compute_CUE(u, R0, lambda_alpha, m):
+def compute_CUE_0(u, R0, lambda_alpha, m):
     """
     Compute Carbon Use Efficiency (CUE)
     
@@ -71,7 +71,7 @@ def compute_community_CUE1(sol, N, rho, num_points=50, return_all=False):
 
 
 # Weighted average
-def compute_community_CUE2(sol, N, u, R0, l, m):
+def compute_CUE(sol, N, u, R0, l, m):
     """
     Compute the community Carbon Use Efficiency (CUE) based on the weighted average of species CUE.
     

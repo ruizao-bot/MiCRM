@@ -16,7 +16,7 @@ def simulate(seed):
     u_pool = param.modular_uptake(N_pool, M_pool, N_modules, s_ratio)
     l_pool = param.generate_l_tensor(N_pool, M_pool, N_modules, s_ratio, λ)
     rho_pool, omega_pool = np.full(M_pool, 0.6), np.full(M_pool, 0.1)
-
+    t_span = (0, 3000)  # Simulation time span
     species_indices1 = np.random.choice(N_pool, N1, replace=False)
     resource_indices1 = np.random.choice(M_pool, M1, replace=False)
     u1 = u_pool[np.ix_(species_indices1, resource_indices1)]
@@ -38,11 +38,11 @@ def simulate(seed):
     l2 = l_pool[np.ix_(species_indices2, resource_indices2, resource_indices2)]
     lambda_alpha2 = np.full(M2, λ)
     rho2, omega2 = rho_pool[resource_indices2], omega_pool[resource_indices2]
-
+    C0_1 = np.full(N1, 0.01)  # 群落 1 的初始种群密度
+    C0_2 = np.full(N2, 0.01)  # 群落 2 的初始种群密度
     R0_1, R0_2 = np.full(M1, 1.0), np.full(M2, 1.0)
-    sol1 = param.solve_micrm(N1, M1, u1, l1, m1, lambda_alpha1, rho1, omega1)
-    sol2 = param.solve_micrm(N2, M2, u2, l2, m2, lambda_alpha2, rho2, omega2)
-
+    sol1 = param.solve_micrm(N1, M1, u1, l1, m1, lambda_alpha1, rho1, omega1, C0_1, R0_1, t_span)
+    sol2 = param.solve_micrm(N2, M2, u2, l2, m2, lambda_alpha2, rho2, omega2, C0_2, R0_2, t_span)
     species_indices3 = np.concatenate([species_indices1, species_indices2])
     resource_indices3 = resource_indices1 if M1 >= M2 else resource_indices2
     u3 = u_pool[np.ix_(species_indices3, resource_indices3)]
@@ -56,7 +56,7 @@ def simulate(seed):
     C0_3 = np.concatenate([sol1.y[:N1, -1], sol2.y[:N2, -1]])
     R0_3 = sol1.y[N1:, -1] + sol2.y[N2:, -1]
 
-    sol3 = param.solve_micrm(N3, M3, u3, l3, m3, lambda_alpha3, rho3, omega3)
+    sol3 = param.solve_micrm(N3, M3, u3, l3, m3, lambda_alpha3, rho3, omega3, C0_3, R0_3, t_span)
 
     # 计算 CUE
     community_CUE1, species_CUE1 = CUE.compute_CUE(sol1, N1, u1, R0_1, l1, m1)
@@ -120,4 +120,4 @@ if __name__ == "__main__":
         all_species_data_nested = pool.map(simulate, seeds)
     all_species_data = [row for seed_result in all_species_data_nested if seed_result for row in seed_result]
     df = pd.DataFrame(all_species_data)
-    df.to_csv("../data/coal_recursive_50.csv", index=False)
+    df.to_csv("../data/coal_recursive.csv", index=False)

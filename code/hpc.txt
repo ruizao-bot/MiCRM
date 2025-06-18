@@ -8,6 +8,7 @@ mkdir yourown
 cd yourown
 put yourown.py
 
+# this terminal is for put and get
 
 # check if it is there
 open another teminal and type

@@ -72,7 +72,7 @@ def simulate(seed):
 
 
     # Merge into Community 3
-    R0_3 = sol1.y[N1:, -1] + sol2.y[N2:, -1]
+    R0_3 = np.full(M1, 1)#sol1.y[N1:, -1] + sol2.y[N2:, -1]
     species_indices3 = np.concatenate([species_indices1, species_indices2])
     resource_indices3 = resource_indices1 if M1 >= M2 else resource_indices2
     N3 = N1 + N2
@@ -97,9 +97,9 @@ def simulate(seed):
     alpha3, r3 = param.compute_alpha_r(C_hat3, R_hat3, N3, M3, u3, l3, m3, lambda_alpha3, omega3)
     sol_elv3 = param.solve_elv(alpha3, r3, C0_3 )
 
-    community_CUE1, species_CUE1 = CUE.compute_community_CUE2(sol1, N1, u1, R0_1, l1, m1)
-    community_CUE2, species_CUE2 = CUE.compute_community_CUE2(sol2, N2, u2, R0_2, l2, m2)
-    community_CUE3, species_CUE3 = CUE.compute_community_CUE2(sol3, N3, u3, R0_3, l3, m3)
+    community_CUE1, species_CUE1 = CUE.compute_CUE(sol1, N1, u1, R0_1, l1, m1)
+    community_CUE2, species_CUE2 = CUE.compute_CUE(sol2, N2, u2, R0_2, l2, m2)
+    community_CUE3, species_CUE3 = CUE.compute_CUE(sol3, N3, u3, R0_3, l3, m3)
     results = []
     result_entry = {"Seed": seed}
     sol_list = [sol1, sol2, sol3] 
@@ -113,22 +113,27 @@ def simulate(seed):
     r_list = [r1, r2, r3]
     C_final_list = []
     num_communities = len(sol_list) 
+    rows = []
+
     for i in range(num_communities):
-
         C_final = np.array(sol_list[i].y[:, -1])
-        C_final_list.append(C_final)
-
-        _, species_CUE = CUE.compute_community_CUE2(
+        _, species_CUE = CUE.compute_CUE(
             sol_list[i], N_list[i], u_list[i], R0_list[i], l_list[i], m_list[i]
         )
 
         for j, (r_val, cue_val, c_val, alpha_val) in enumerate(zip(r_list[i], species_CUE, C_final, alpha_list[i])):
-            result_entry[f"r_Comm{i+1}_Sp{j+1}"] = r_val
-            result_entry[f"CUE_Comm{i+1}_Sp{j+1}"] = cue_val
-            result_entry[f"Cfinal_Comm{i+1}_Sp{j+1}"] = c_val
-            result_entry[f"alpha_Comm{i+1}_Sp{j+1}"] = alpha_val
-    results.append(result_entry)
-    return results
+            row = {
+                "Seed": seed,  # <-- Add this line
+                "community_id": f"Comm{i+1}",
+                "species_id": f"Sp{j+1}",
+                "r": r_val,
+                "CUE": cue_val,
+                "Cfinal": c_val,
+                "alpha": alpha_val  # 存成字符串或列表都行
+            }
+            rows.append(row)
+    return rows
+
 
 if __name__ == "__main__":
     with open('seeds.txt', 'r') as f:
@@ -136,6 +141,7 @@ if __name__ == "__main__":
 
     with Pool(cpu_count()) as pool:
         all_results_nested = pool.map(simulate, seeds)
-    all_results = [row for seed_result in all_results_nested if seed_result for row in seed_result]
-    df = pd.DataFrame(all_results)
-    df.to_csv("../data/elv_hpc.csv", index=False)
+    all_rows = [row for seed_result in all_results_nested if seed_result for row in seed_result]
+    df = pd.DataFrame(all_rows)
+    df.to_csv("../data/elv_hpc_sameR0.csv", index=False)
+

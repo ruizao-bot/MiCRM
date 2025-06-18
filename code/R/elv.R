@@ -5,12 +5,12 @@ library(tidyr)
 library(dplyr)
 library(stringr)
 
-df <- read.csv("../data/elv_hpc.csv")
+df <- read.csv("../data/elv_hpc_sameR0.csv")
 library(tidyr)
 library(dplyr)
 
 df_clean <- df %>% drop_na()
-df_select <- df %>% filter(Abundance > 1e-5 )
+df_select <- df %>% filter(Cfinal > 1e-10 )
 
 for (community in unique(df_select$Community)) {
   df_sub <- df_select %>% filter(Community == community)
@@ -22,14 +22,14 @@ for (community in unique(df_select$Community)) {
 ggplot(df_select, aes(x = CUE, y = r)) +
   geom_point(alpha = 0.6) +
   geom_smooth(method = "lm", se = TRUE, color = "blue") +
-  facet_wrap(~ Community) +
+  facet_wrap(~ community_id) +
   labs(title = "Growth Rate (r) vs Species CUE by Community",
        x = "Species CUE",
        y = "Growth Rate (r)") +
   theme_minimal()
 
-ggplot(df_surv, aes(x = factor(Community), y = CUE)) +
-  geom_boxplot(fill = factor(Community)) +
+ggplot(df_select, aes(x = factor(community_id), y = CUE)) +
+  geom_boxplot(fill = factor(community_id)) +
   labs(title = "CUE by Community",
        x = "Community", y = "CUE") +
   theme_minimal()

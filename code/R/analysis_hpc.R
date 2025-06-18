@@ -9,10 +9,10 @@ library(patchwork)
 
 df <- read.csv("../data/coal_recursive_hpc.csv")
 
-df_select <- df %>%
-  mutate(Status = ifelse(Abundance < 1e-5, "Extinction", "Survival"))
+df_select <- df3 %>%
+  mutate(Status = ifelse(Abundance < 1e-10, "Extinction", "Survival"))
 df_surv <- df_select %>%
-  filter(Abundance > 1e-5)
+  filter(Abundance > 1e-10)
 # standrdise species number
 species_counts <- df_surv %>%
   distinct(Seed, Community, Species_ID) %>%  # 每个种群中独立物种去重
@@ -34,11 +34,11 @@ df_sad <- df_surv %>%
   mutate(RelAbund = Abundance / sum(Abundance)) %>%
   ungroup()
 
-ggplot(df_sad, aes(x = RelAbund, fill = factor(Community), color = factor(Community))) +
+ggplot(df, aes(x = Abundance, fill = factor(Community), color = factor(Community))) +
   geom_histogram(position = "identity", alpha = 0.3, bins = 50) +
   scale_x_log10() +
   theme_minimal() +
-  labs(x = "Relative Abundance (log-scaled axis)",
+  labs(x = "Abundance (log-scaled axis)",
        y = "Frequency (Histogram) / Density (Curve)",
        fill = "Community", color = "Community") +
   scale_fill_manual(values = c("red", "chartreuse3", "blue")) +
@@ -209,22 +209,37 @@ df_stats <- df_surv%>%
   group_by(Seed, Community, Community_CUE) %>%
   summarise(
     Richness = n_distinct(Species_ID),
-    CUE.Var = var(Species_CUE),
+    CUE.Var = var(Species_CUE, na.rm = TRUE),
     .groups = "drop"
   )
 
-ggplot(df_stats, aes(x = CUE.Var, y = Richness, color = factor(Community))) +
-  geom_point() +
-  geom_smooth(method = "lm", se = TRUE) +
+comm_colors <- c("1" = "red", "2" = "chartreuse3", "3" = "blue")
+
+ggplot(df_stats,
+       aes(x = CUE.Var, y = Richness,
+           color = factor(Community), shape = factor(Community))) +
+  geom_point(size = 2, alpha = 0.8) +
+  geom_smooth(method = "lm", se = TRUE, linetype = "solid", size = 1) +
+  scale_color_manual(values = comm_colors, name = "Community") +
+  scale_shape_manual(values = c(16, 17, 15), name = "Community") +
   facet_wrap(~ Community, scales = "free_x") +
-  labs(x = "CUE Variation", y = "Species Richness") +
-  theme_minimal()+
-  labs(title = "",
-       x = "CUE Variation", y = "Species Richness") +
-  scale_fill_manual(values = c("red", "#2ca02c", "blue")) +
-  scale_color_manual(values = c("red", "#2ca02c", "blue"))
-
-
+  labs(
+    x = expression("Species CUE Variance"),
+    y = "Species Richness"
+  ) +
+  scale_x_log10(
+    breaks  = function(lims) log_breaks(n = 4)(lims),   # ⬅️ 每面板 4 个刻度
+    minor_breaks = NULL           # 关掉小刻度（可选）
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "top",
+    legend.title    = element_text(size = 13),
+    legend.text     = element_text(size = 12),
+    axis.title      = element_text(size = 15),
+    axis.text       = element_text(size = 13),
+    strip.text      = element_text(size = 14)
+  )
 for (comm in c(1, 2,3)) {
   model_var <- lm(Richness ~ CUE.Var, data = subset(df_stats, Community == comm))
   cat("\n---", comm, "---\n")
@@ -300,3 +315,5 @@ ggplot() +
   ) +
   theme_minimal(base_size = 14)
 
+df2 <- read.csv("../data/coal_recursive.csv")
+df3 <- read.csv("../data/coal_recursive_1.csv")

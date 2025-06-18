@@ -19,57 +19,43 @@ def fix_alpha_string(s):
         return "[" + s + "]"
     return s
 
-def build_network(df, comm_prefix, seed=None, quantile=0.7):
-    # Get all alpha columns for the given community
-    alpha_cols = [col for col in df.columns if col.startswith(f"alpha_{comm_prefix}")]
-    # Extract all species IDs (from column names like 'alpha_CommX_SpY')
-    all_species_ids = sorted([int(col.split("_Sp")[-1]) for col in alpha_cols])
-    
-    # Select the row corresponding to the specified seed; if not provided, sample a random row
-    if seed is not None:
-        row = df[df["Seed"] == seed]
-        if row.empty:
-            return None  # No row exists with the specified seed
-        random_row = row.iloc[0]
-    else:
-        random_row = df.sample(n=1, random_state=np.random.randint(1e6)).iloc[0]
-    
-    # Filter species based on Cfinal threshold
-    # Only include species whose Cfinal value is greater than cfinal_threshold
-    species_ids = all_species_ids
-    # Extract CUE values for the filtered species
-    cue_vals = {sp: random_row[f"CUE_{comm_prefix}_Sp{sp}"] for sp in species_ids}
-    
-    # Extract alpha vectors for each filtered species
-    alpha_matrix = {}
-    for sp in species_ids:
-        raw_string = fix_alpha_string(random_row[f"alpha_{comm_prefix}_Sp{sp}"])
-        alpha_array = np.array(ast.literal_eval(raw_string))
-        alpha_matrix[sp] = alpha_array
+def build_network(df, community, seed, quantile=0.7):
+    # Filter for this seed and community, and for survivors
+    df_sub = df[(df["Seed"] == seed) & (df["community_id"] == community) & (df["Cfinal"] > 1e-10)].copy()
+    if df_sub.empty or len(df_sub) < 2:
+        return None
 
-    # Compute pairwise average interaction weights between species pairs
+    species_ids = df_sub["species_id"].tolist()
+    cues = df_sub["CUE"].values
+    alpha_matrix = []
+    for alpha_str in df_sub["alpha"]:
+        alpha_vec = np.array(ast.literal_eval(fix_alpha_string(alpha_str)))
+        # Only keep the entries for surviving species (by index)
+        # Assume alpha_vec is full length, so filter by indices of survivors
+        survivor_indices = [int(sid[2:]) - 1 for sid in species_ids]  # Sp1 -> 0, Sp2 -> 1, ...
+        filtered_vec = alpha_vec[survivor_indices]
+        alpha_matrix.append(filtered_vec)
+    alpha_matrix = np.array(alpha_matrix)
+
+    # Compute pairwise average interaction weights
     all_weights = [
-        (abs(alpha_matrix[i][species_ids.index(j)]) + abs(alpha_matrix[j][species_ids.index(i)])) / 2
-        for i in species_ids for j in species_ids if i < j
+        (abs(alpha_matrix[i, j]) + abs(alpha_matrix[j, i])) / 2
+        for i in range(len(species_ids)) for j in range(len(species_ids)) if i < j
     ]
-    # Use the specified quantile as threshold to keep only strong interactions
+    if len(all_weights) == 0:
+        return None
     threshold = np.quantile(all_weights, quantile)
 
-    # Create the network graph and add nodes with their CUE attribute
+    # Build network
     G = nx.Graph()
-    for sp in species_ids:
-        G.add_node(sp, cue=cue_vals[sp])
-    
-    # Add edges between species pairs if their interaction weight exceeds the threshold
-    for i in species_ids:
-        for j in species_ids:
-            if i < j:
-                w = (abs(alpha_matrix[i][species_ids.index(j)]) + abs(alpha_matrix[j][species_ids.index(i)])) / 2
-                if w > threshold:
-                    G.add_edge(i, j, weight=w)
-
+    for i, sp in enumerate(species_ids):
+        G.add_node(sp, cue=cues[i])
+    for i in range(len(species_ids)):
+        for j in range(i + 1, len(species_ids)):
+            w = (abs(alpha_matrix[i, j]) + abs(alpha_matrix[j, i])) / 2
+            if w > threshold:
+                G.add_edge(species_ids[i], species_ids[j], weight=w)
     return G
-
 
 
 # ======================= visualization =======================
@@ -79,13 +65,13 @@ def plot_network(G, title):
     edge_weights = [G[u][v]['weight'] for u, v in G.edges()]
     norm = plt.Normalize(vmin=min(edge_weights), vmax=max(edge_weights))
 
-    fig, ax = plt.subplots(figsize=(12, 10))
+    fig, ax = plt.subplots(figsize=(10, 8))
     nx.draw_networkx_nodes(G, pos, node_size=100, node_color=node_colors, cmap='viridis', ax=ax)
     nx.draw_networkx_edges(G, pos, edge_color=edge_weights, edge_cmap=plt.cm.coolwarm, edge_vmin=min(edge_weights), edge_vmax=max(edge_weights), width=2, ax=ax)
 
     sm_nodes = plt.cm.ScalarMappable(cmap='viridis', norm=plt.Normalize(vmin=min(node_colors), vmax=max(node_colors)))
     sm_nodes.set_array([])
-    plt.colorbar(sm_nodes, ax=ax, shrink=0.7, label="Mean CUE")
+    plt.colorbar(sm_nodes, ax=ax, shrink=0.7, label="CUE")
 
     sm_edges = plt.cm.ScalarMappable(cmap='coolwarm', norm=norm)
     sm_edges.set_array([])
@@ -424,7 +410,7 @@ def get_all_replicate_data(df, comm_prefix, seed_range):
 
 
 # ======================= Usage =======================
-df = pd.read_csv("../data/elv_hpc.csv")
+df = pd.read_csv("data/elv_hpc_sameR0.csv")
 comms = ["Comm1", "Comm2", "Comm3"]
 labels = ["Community 1", "Community 2", "Community 3"]
 colors = ["red", "green", "blue"]

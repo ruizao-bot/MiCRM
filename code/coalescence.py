@@ -56,8 +56,8 @@ rho2 = rho_pool[resource_indices2]
 omega2 = omega_pool[resource_indices2]
 
 # Time span for simulation
-t_span = (0, 600)
-t_eval = np.linspace(*t_span, 300)
+t_span = (0, 5000)
+
 
 # Simulate Community 1
 C0_1 = np.full(N1, 0.01)  # Initial consumer abundance
@@ -65,12 +65,12 @@ C0_2 = np.full(N1, 0.01)
 #R0 = np.full(M1, 1)        # Initial resource abundance
 R0_1 = np.full(M1, 1)
 R0_2 = np.full(M2, 1)
-sol1 = param.solve_micrm(N1, M1, u1, l1, m1, lambda_alpha1, rho1, omega1, C0_1, R0_1)
+sol1 = param.solve_micrm(N1, M1, u1, l1, m1, lambda_alpha1, rho1, omega1, C0_1, R0_1, t_span)
 ce1 = sol1.y[:N1, -1]  # Consumer abundance at equilibrium
 re1 = sol1.y[N1:, -1]  # Resource abundance at equilibrium
 
 # Simulate Community 2
-sol2 = param.solve_micrm(N2, M2, u2, l2, m2, lambda_alpha2, rho2, omega2, C0_2,  R0_2)
+sol2 = param.solve_micrm(N2, M2, u2, l2, m2, lambda_alpha2, rho2, omega2, C0_2,  R0_2, t_span)
 ce2 = sol2.y[:N2, -1]
 re2 = sol2.y[N2:, -1]
 
@@ -88,39 +88,44 @@ N3 = N1 + N2
 M3 = len(resource_indices3)
 rho3 = rho_pool[resource_indices3]
 C0_3 = np.concatenate([ce1, ce2])
-R0_3 = re1 + re2
+R0_3 = np.full(M1, 1)#re1 + re2
 
-sol3 = param.solve_micrm(N3, M3, u3, l3, m3, lambda_alpha3, rho3, omega3, C0_3, R0_3)
+sol3 = param.solve_micrm(N3, M3, u3, l3, m3, lambda_alpha3, rho3, omega3, C0_3, R0_3, t_span)
 #############################################
-# Plot biomass change over time
+import matplotlib.cm as cm
+
+# Plot biomass change over time with color gradient for species
 fig, axes = plt.subplots(1, 3, figsize=(20, 8), sharey=True)
-# Plot for Community 1
-cmap1 = plt.get_cmap("Blues")
-for i, idx in enumerate(species_indices1):
-    axes[0].plot(sol1.t, sol1.y[i], color=cmap1((i + 1) / (N1 + 1)), label=f"c{idx}")
+
+# Community 1: blue gradient
+colors1 = cm.Blues(np.linspace(0.3, 1, N1))  # skip very light colors
+for i in range(N1):
+    axes[0].plot(sol1.t, sol1.y[i], color=colors1[i], alpha=0.8, linewidth=1)
 axes[0].set_title('Community 1 Dynamics')
 axes[0].set_xlabel('Time')
 axes[0].set_ylabel('Consumer Abundance')
 axes[0].grid(True)
-axes[0].legend(loc='upper right', fontsize='small')
-# Plot for Community 2
-cmap2 = plt.get_cmap("Reds")
-for i, idx in enumerate(species_indices2):
-    axes[1].plot(sol2.t, sol2.y[i], color=cmap2((i + 1) / (N2 + 1)), label=f"c{idx}")
-axes[1].set_title('Community 2 Dynamics ')
+
+# Community 2: red gradient
+colors2 = cm.Reds(np.linspace(0.3, 1, N2))
+for i in range(N2):
+    axes[1].plot(sol2.t, sol2.y[i], color=colors2[i], alpha=0.8, linewidth=1)
+axes[1].set_title('Community 2 Dynamics')
 axes[1].set_xlabel('Time')
 axes[1].grid(True)
-axes[1].legend(loc='upper right', fontsize='small')
-# Plot for Community 3 (merged)
-for i, idx in enumerate(species_indices1):
-    axes[2].plot(sol3.t, sol3.y[i], color=cmap1((i + 1) / (N1 + 1)), label=f"c{idx}")
-for i, idx in enumerate(species_indices2):
-    axes[2].plot(sol3.t, sol3.y[N1 + i], color=cmap2((i + 1) / (N2 + 1)), label=f"c{idx}")
+
+# Community 3 (merged): blue for residents, red for invaders
+colors3_res = cm.Blues(np.linspace(0.3, 1, N1))
+colors3_inv = cm.Reds(np.linspace(0.3, 1, N2))
+for i in range(N1):
+    axes[2].plot(sol3.t, sol3.y[i], color=colors3_res[i], alpha=0.8, linewidth=1)
+for i in range(N2):
+    axes[2].plot(sol3.t, sol3.y[N1 + i], color=colors3_inv[i], alpha=0.8, linewidth=1)
 axes[2].set_title('Coalescence Dynamics')
 axes[2].set_xlabel('Time')
 axes[2].grid(True)
-axes[2].legend(loc='upper right', fontsize='small', ncol=2)
-plt.tight_layout(rect=[0, 0, 0.85, 1])  # leaves space on the right for legends
+
+plt.tight_layout(rect=[0, 0, 0.85, 1])
 plt.show()
 ###### compare the community CUE between survival and extinction######
 sol_list = [sol1, sol2, sol3]
@@ -140,13 +145,13 @@ for i in range(num_communities):
     t = sol_list[i].t
     C_all = sol_list[i].y[:N_list[i], :]
 
-    _, species_CUE = CUE.compute_community_CUE2(
+    _, species_CUE = CUE.compute_CUE(
         sol_list[i], N_list[i], u_list[i], R0_list[i], l_list[i], m_list[i]
     )
     species_CUE = np.array(species_CUE, dtype=float)
 
     for j in range(N_list[i]):
-        status = "Survival" if C_final[j] >= 1e-5 else "Extinction"
+        status = "Survival" if C_final[j] >= 1e-10 else "Extinction"
         data_to_save.append({
             "Community": i + 1,
             "Species": f"Sp{j+1}",
