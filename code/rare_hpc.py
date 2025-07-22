@@ -133,7 +133,7 @@ if __name__ == "__main__":
     with open('seeds.txt', 'r') as f:
         seeds = [int(line.strip()) for line in f][:10]
 
-    dilution_rates = [0.01, 0.05, 0.1, 0.5]
+    dilution_rates = [0.01, 0.05, 0.1]
     param_list = [(seed, dr) for seed in seeds for dr in dilution_rates]
 
     with Pool(cpu_count()) as pool:

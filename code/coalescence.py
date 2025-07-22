@@ -151,7 +151,7 @@ for i in range(num_communities):
     species_CUE = np.array(species_CUE, dtype=float)
 
     for j in range(N_list[i]):
-        status = "Survival" if C_final[j] >= 1e-10 else "Extinction"
+        status = "Survival" if C_final[j] >= 1e-5 else "Extinction"
         data_to_save.append({
             "Community": i + 1,
             "Species": f"Sp{j+1}",

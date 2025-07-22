@@ -67,7 +67,7 @@ def generate_l_tensor(N, M, N_modules, s_ratio, λ):
 
 def solve_micrm(
     N, M, u, l, m, lambda_alpha, rho, omega, C0, R0,
-    t_span, t_eval=None, tol=1e-5, method='LSODA'
+    t_span, t_eval=None, tol=1e-5, method='BDF'
 ):
     """
     Integrate the MiCRM ODEs until equilibrium or t_span is reached.
@@ -109,7 +109,7 @@ def solve_micrm(
     equilibrium_event.direction = -1
 
     if t_eval is None:
-        t_eval = np.linspace(t_span[0], t_span[1], 300)
+        t_eval = np.linspace(t_span[0], t_span[1], 100)
     Y0 = np.concatenate([C0, R0])
 
     sol = solve_ivp(
@@ -131,7 +131,7 @@ def compute_alpha_r(C_hat, R_hat, N, M, u, l, m, lambda_alpha, omega):
     return alpha, r
 
 
-def solve_elv(alpha, r, C0, t_span=(0, 1000), t_eval=None):
+def solve_elv(alpha, r, C0, t_span=(0, 50000), t_eval=None):
     N = len(C0)
     if t_eval is None:
         t_eval = np.linspace(t_span[0], t_span[1], 300)
@@ -142,5 +142,21 @@ def solve_elv(alpha, r, C0, t_span=(0, 1000), t_eval=None):
             dCdt[i] = C[i] * (r[i] + sum(alpha[i, j] * C[j] for j in range(N)))
         return dCdt
 
-    sol = solve_ivp(dCdt_elv, t_span, C0, t_eval=t_eval, method="RK45")
+    sol = solve_ivp(dCdt_elv, t_span, C0, t_eval=t_eval, method="BDF")
     return sol
+
+def compute_Rstar(m, u, λ, R0):
+    """
+    Compute R*_i for each species i and each resource a.
+    Returns a matrix of shape (N_species, N_resources).
+    """
+    # m: (N_species,)
+    # u: (N_species, N_resources)
+    # l: (N_species, N_resources)
+    # R0: (N_resources,)
+    numerator = m[:, np.newaxis]  # shape (N_species, 1)
+    denominator = u * (1 - λ) * R0  # shape (N_species, N_resources)
+    # Avoid division by zero
+    denominator = np.where(denominator == 0, np.nan, denominator)
+    Rstar = numerator / denominator  # shape (N_species, N_resources)
+    return Rstar

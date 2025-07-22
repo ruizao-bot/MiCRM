@@ -15,7 +15,7 @@ def simulate(seed):
 
     u_pool = param.modular_uptake(N_pool, M_pool, N_modules, s_ratio)
     l_pool = param.generate_l_tensor(N_pool, M_pool, N_modules, s_ratio, λ)
-    rho_pool, omega_pool = np.full(M_pool, 0.6), np.full(M_pool, 0.1)
+    rho_pool, omega_pool = np.full(M_pool, 0.6), np.full(M_pool, 0)
     t_span = (0, 3000)  # Simulation time span
     species_indices1 = np.random.choice(N_pool, N1, replace=False)
     resource_indices1 = np.random.choice(M_pool, M1, replace=False)
@@ -120,4 +120,4 @@ if __name__ == "__main__":
         all_species_data_nested = pool.map(simulate, seeds)
     all_species_data = [row for seed_result in all_species_data_nested if seed_result for row in seed_result]
     df = pd.DataFrame(all_species_data)
-    df.to_csv("../data/coal_recursive.csv", index=False)
+    df.to_csv("../data/coal_recursive_0omega.csv", index=False)

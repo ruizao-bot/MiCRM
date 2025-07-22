@@ -7,7 +7,7 @@ library(scales)
 library(stringr)
 library(patchwork)
 
-df <- read.csv("../data/coal_sameR0_lsoda.csv")
+df <- read.csv("../data/coal_sameR0_0omega.csv")
 df_select <- df %>%mutate(Status = ifelse(Abundance < 1e-5, "Extinction", "Survival"))
 df_surv <- df_select %>%
   filter(Abundance > 1e-5)
@@ -16,10 +16,6 @@ species_counts <- df_surv %>%
   distinct(Seed, Community, Species_ID) %>%  # 每个种群中独立物种去重
   group_by(Seed, Community) %>%
   summarise(SpeciesCount = n(), .groups = "drop")
-# 自定义 RGB 唯美配色
-pal_rgb <- c("1" = "#E74C3C",   # 红
-             "2" = "#2ECC71",   # 绿
-             "3" = "#3498DB")   # 蓝
 
 ###TEST lsoda####
 #df1 <- read.csv("../data/coal_sameR0_lsoda.csv")
@@ -50,6 +46,10 @@ df_surv <- df_surv %>%
 
 library(ggplot2)
 
+# 自定义 RGB 唯美配色
+pal_rgb <- c("1" = "#E74C3C",   # 红
+             "2" = "#2ECC71",   # 绿
+             "3" = "#3498DB")   # 蓝
 
 # Rank abundance
 p <- ggplot(df_surv,
@@ -167,11 +167,6 @@ ggplot(df_ext, aes(x = factor(Community), y = Species_CUE, fill = StatusGroup)) 
   geom_jitter(aes(color = StatusGroup), 
               position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.8),
               size = 0.1, alpha = 0.3) +
-  annotate("text", 
-           x = 3 + 0.3,  # 右移一点以对应 Survival_3
-           y = 0.29,     # 自行根据你的图中上限微调
-           label = "*", 
-           size = 6) +
   scale_fill_manual(values = c(
     Extinction  = "grey60",
     Survival_1  = "#E74C3C",
@@ -183,12 +178,12 @@ ggplot(df_ext, aes(x = factor(Community), y = Species_CUE, fill = StatusGroup)) 
     Survival_1  = "#E74C3C",
     Survival_2  = "#2ECC71",
     Survival_3  = "#3498DB"
-  )) +
+  ))
++
   labs(x = "Community", y = "CUE", fill = "Status", color = "Status") +
   theme_minimal()
 
-
-########################### sigmoid curve #####################################
+########################### logistic #####################################
 library(minpack.lm)
 library(dplyr)
 
@@ -239,8 +234,8 @@ ggplot(df_surv,
   facet_wrap(~ Community, nrow = 1) +  # ← 按 Community 分 3 面板
   theme_minimal() +
   labs(
-    x     = "Species-level CUE ",
-    y     = "Abundance",
+    x     = "Species-level CUE (log scale)",
+    y     = "Abundance (log scale)",
     color = "Community"
   ) 
 
@@ -317,48 +312,50 @@ library(vegan)   # vegdist()
 
 bray_results <- data.frame()     # 若已存在则可省略
 
-df_mut <- df_surv %>%
-  mutate(Global_Species_ID = case_when(
-    Community == 2 ~ Species_ID + 100,
-    TRUE ~ Species_ID
-  ))
-
-bray_results <- data.frame()
-
 for (s in unique(df_mut$Seed)) {
-  df_seed <- df_mut %>% filter(Seed == s) %>% as.data.frame()
+  
+  df_seed <- df_mut %>% 
+    filter(Seed == s) %>% 
+    as.data.frame()
+  
   if (!all(c(1, 2, 3) %in% unique(df_seed$Community))) next
   
+  # —— 宽格式矩阵，每行一个 Community ——
   comm_mat <- df_seed %>%
-    dplyr::select(Community, Global_Species_ID, Abundance) %>%
+    dplyr::select(Community, Global_Species_ID, Abundance) %>%   # ← 唯一改动
     pivot_wider(
-      names_from = Global_Species_ID,
+      names_from  = Global_Species_ID,
       values_from = Abundance,
       values_fill = list(Abundance = 0)
     )
   rownames(comm_mat) <- comm_mat$Community
   comm_mat$Community <- NULL
+  
   if (nrow(comm_mat) != 3) next
   
-  bc <- vegdist(comm_mat, method = "bray")
+  # —— Bray–Curtis 距离 ——
+  bc     <- vegdist(comm_mat, method = "bray")
   bc_mat <- as.matrix(bc)
+  
   if (!all(c("3", "1", "2") %in% rownames(bc_mat))) next
   
-  d31 <- bc_mat["3", "1"]
-  d32 <- bc_mat["3", "2"]
+  d31  <- bc_mat["3", "1"]
+  d32  <- bc_mat["3", "2"]
   cue1 <- unique(df_seed$Community_CUE[df_seed$Community == 1])
   cue2 <- unique(df_seed$Community_CUE[df_seed$Community == 2])
   
-  bray_results <- rbind(bray_results, data.frame(
-    Seed = s,
-    Bray_3vs1 = d31,
-    Bray_3vs2 = d32,
-    CUE_1 = cue1,
-    CUE_2 = cue2,
-    Sim_3vs1 = 1 - d31,
-    Sim_3vs2 = 1 - d32
-  ))
-  
+  bray_results <- rbind(
+    bray_results,
+    data.frame(
+      Seed      = s,
+      Bray_3vs1 = d31,
+      Bray_3vs2 = d32,
+      CUE_1     = cue1,
+      CUE_2     = cue2,
+      Sim_3vs1  = 1 - d31,
+      Sim_3vs2  = 1 - d32
+    )
+  )
 }
 
 # 拟合线性模型
@@ -400,143 +397,23 @@ summary(model)
 
 library(ggplot2)
 
+cue_seq <- seq(min(df_comm$Community_CUE), max(df_comm$Community_CUE), length.out = 300)
+
+predicted <- predict(model, newdata = data.frame(Community_CUE = cue_seq), type = "response")
+
+df_pred <- data.frame(
+  Community_CUE = cue_seq,
+  Probability = predicted
+)
 
 ggplot(df_comm, aes(x = Community_CUE, y = Dominance, color = factor(Community))) +
-  geom_jitter(width = 0.0005, height = 0.05, alpha = 0.6, size = 2) +
-  geom_line(data = df_pred, aes(x = Community_CUE, y = Dominance), 
+  geom_jitter(width = 0.0005, height = 0.05, alpha = 1, size = 2) +
+  geom_line(data = df_pred, aes(x = Community_CUE, y = Probability), 
             color = "grey", linewidth = 1, alpha = 1, inherit.aes = FALSE) +
-  scale_color_manual(values = c("1" = "#E74C3C", "2" = "#2ECC71")) +
   labs(title = "",
        x = "CUE Value",
        y = "Probability of Dominance (1 = Dominant)",
        color = "Community") +
   theme_minimal()
 
-
-############################ combination of CUE and abundance ########################
-library(dplyr)
-library(patchwork)
-
-# 配色
-pal_rgb <- c("1" = "#e41a1c", "2" = "#4daf4a", "3" = "#377eb8")
-
-# 设置统一 y 轴范围（log10）
-y_min <- min(df_surv$Abundance[df_surv$Abundance > 0], na.rm = TRUE)
-y_max <- max(df_surv$Abundance, na.rm = TRUE)
-
-# 主题设定（不依赖 showtext）
-base_theme <- theme_minimal(base_size = 11, base_family = "Times New Roman")
-
-# 保存拼图结果
-plots <- list()
-
-for (comm in c("1", "2", "3")) {
-  df_i <- df_surv %>% filter(Community == comm)
-  fit_i <- fit_lines %>% filter(Community == comm)
-  
-  # 主图：CUE vs Abundance（log10 Y 轴）
-  p_main <- ggplot(df_i, aes(x = Species_CUE, y = Abundance)) +
-    geom_point(color = pal_rgb[comm], alpha = 0.3)  +
-    scale_y_log10(limits = c(y_min, y_max)) +
-    labs(x = "Species-level CUE", y = "Abundance") +
-    base_theme
-
-  p_hist <- ggplot(df_i, aes(x = Abundance)) +
-    geom_histogram(bins = 50,
-                   fill = pal_rgb[comm],
-                   alpha = 0.3,
-                   color = pal_rgb[comm]) +
-    geom_vline(xintercept = 1e-5, linetype = "dashed") +
-    scale_x_log10(limits = c(y_min, y_max)) +
-    coord_flip() +  # 横过来：Abundance 成为 y 轴
-    scale_y_reverse() +
-    labs(x = "Frequency", y = NULL) +
-    base_theme +
-    theme(
-      axis.text.y = element_blank(),
-      axis.ticks.y = element_blank(),
-      panel.grid.major.y = element_blank(),
-      plot.margin = margin(5, 5, 5, 5)
-    )
-  
-  p_combo <- p_hist + p_main + plot_layout(widths = c(1.2, 3))
-  plots[[comm]] <- p_combo
-}
-# 纵向排列 3 个社区图
-final_plot <- wrap_plots(plots, ncol = 1)
-
-# 导出高清图像（A4 宽，论文可用）
-ggsave("cue_abund_mirror_fit.png",
-       plot = final_plot,
-       width = 21,      # A4 宽
-       height = 24,     # 每个子图约 8cm
-       units = "cm",
-       dpi = 600,
-       bg = "white")
-############################ combination of boxplot and barplot of CUE########################
-library(ggplot2)
-library(dplyr)
-library(patchwork)
-
-# 定义颜色
-pal_rgb <- c("1" = "#E74C3C", "2" = "#2ECC71", "3" = "#3498DB")
-
-# 处理 boxplot 数据
-df_ext <- df %>% 
-  mutate(
-    StatusGroup = ifelse(Abundance < 1e-5,
-                         "Extinction",
-                         paste0("Survival_", Community))
-  ) %>% 
-  dplyr::select(Community, Species_CUE, StatusGroup) %>% 
-  mutate(
-    Community   = factor(Community, levels = c(1, 2, 3)),
-    StatusGroup = factor(StatusGroup,
-                         levels = c("Extinction",
-                                    "Survival_1",
-                                    "Survival_2",
-                                    "Survival_3"))
-  )
-
-# boxplot 图
-p_box <- ggplot(df_ext, aes(x = Species_CUE, y = StatusGroup, fill = StatusGroup)) +
-  geom_boxplot(outlier.shape = NA, alpha = 0.3) +
-  geom_jitter(aes(color = StatusGroup),
-              position = position_jitter(height = 0.15, width = 0),
-              size = 0.2, alpha = 0.3) +
-  annotate("text", x = 0.29, y = "Survival_3", label = "*", size = 6) +
-  scale_fill_manual(values = c(
-    Extinction  = "grey60",
-    Survival_1  = "#E74C3C",
-    Survival_2  = "#2ECC71",
-    Survival_3  = "#3498DB"
-  )) +
-  scale_color_manual(values = c(
-    Extinction  = "grey60",
-    Survival_1  = "#E74C3C",
-    Survival_2  = "#2ECC71",
-    Survival_3  = "#3498DB"
-  )) +
-  labs(x = "Species-level CUE", y = NULL, fill = "Status", color = "Status") +
-  theme_minimal()
-
-
-
-# histogram 图
-p_hist <- ggplot(df_surv, 
-                 aes(x = Species_CUE, fill = factor(Community), color = factor(Community))) +
-  geom_histogram(position = "identity", alpha = 0.3, bins = 50) +
-  scale_x_log10() +
-  scale_fill_manual(values = pal_rgb) +
-  scale_color_manual(values = pal_rgb) +
-  labs(x = "Species-level CUE", y = "Frequency",
-       fill = "Community", color = "Community") +
-  theme_minimal()
-
-# 合并上下图
-combined_plot <- p_hist / p_box + 
-  plot_layout(heights = c(2, 1))  # 可调整比例
-
-# 保存为 PDF 或 PNG
-ggsave("cue_combined_plot.pdf", combined_plot, width = 18, height = 15, units = "cm")
 
