@@ -199,23 +199,30 @@ def plot_gengamma_fit(result, comm_prefix, color):
     plt.tight_layout()
     plt.show()
 
-def plot_cue_vs_strength(cues, strengths, community, color, show_ylabel=False):
-    plt.scatter(cues, strengths, alpha=0.3, s=5, color=color, label="Species")
+def plot_cue_vs_strength(cues, strengths, community, color,
+                         show_ylabel=False, s=6, alpha=1.0):
+    ax = plt.gca()
+
+    # 实心圆点：无边框、线宽 0、透明度高
+    ax.scatter(cues, strengths,
+               s=s, marker='o',
+               c=[color], edgecolors='none', linewidths=0,
+               alpha=alpha, rasterized=False)
+
+    # LOWESS
     if len(cues) >= 10:
         smoothed = lowess(strengths, cues, frac=0.3, return_sorted=True)
-        plt.plot(smoothed[:, 0], smoothed[:, 1], color="black", lw=1.5, label="LOWESS fit")
-    plt.xlabel("CUE")
+        ax.plot(smoothed[:, 0], smoothed[:, 1], color="black", lw=1.5, label="LOWESS fit")
 
-    ax = plt.gca()
+    ax.set_xlabel("CUE")
     if show_ylabel:
-        plt.ylabel("Interaction Strength")
+        ax.set_ylabel("Interaction Strength")
     else:
         ax.set_ylabel("")
         ax.set_yticklabels([])
         ax.tick_params(axis='y', which='both', left=False)
 
-    plt.title(f"{community}")
-   # plt.legend()
+    ax.set_title(f"{community}")
 
 
 # ========== Main Analysis ==========
@@ -261,15 +268,15 @@ if __name__ == "__main__":
     # plt.tight_layout()
     # plt.show()
 
-    # # CUE vs Degree
-    # plt.figure(figsize=(15, 4))
-    # for i, comm in enumerate(communities):
-    #     color = pal_rgb[comm]
-    #     cues, degrees = compute_cue_and_degree(df, comm, seed_range)
-    #     plt.subplot(1, 3, i+1)
-    #     plot_cue_vs_degree(cues, degrees, comm, color)
-    # plt.tight_layout()
-    # plt.show()
+    # CUE vs Degree
+    plt.figure(figsize=(15, 4))
+    for i, comm in enumerate(communities):
+        color = pal_rgb[comm]
+        cues, degrees = compute_cue_and_degree(df, comm, seed_range)
+        plt.subplot(1, 3, i+1)
+        plot_cue_vs_degree(cues, degrees, comm, color)
+    plt.tight_layout()
+    plt.show()
 
     # CUE vs Interaction Strength
     # %%
@@ -514,43 +521,42 @@ plt.tight_layout(rect=[0, 0, 1, 0.92])
 plt.savefig("../results/CUE_degree_guassian.png", dpi=600, bbox_inches="tight")
 plt.show()
 
-# %%
 # %% test fitness
-# from scipy import stats
-# from sklearn.model_selection import ShuffleSplit
-# from sklearn.metrics   import mean_squared_error
+from scipy import stats
+from sklearn.model_selection import ShuffleSplit
+from sklearn.metrics   import mean_squared_error
 
-# #……（popt, pcov 已由 curve_fit 得到）……
-# n = len(degrees); k = len(popt)
-# y_hat = gaussian(cues, *popt)
-# resid = degrees - y_hat
-# RSS   = np.sum(resid**2)
+#……（popt, pcov 已由 curve_fit 得到）……
+n = len(degrees); k = len(popt)
+y_hat = gaussian(cues, *popt)
+resid = degrees - y_hat
+RSS   = np.sum(resid**2)
 
-# # R², RMSE
-# R2   = r2_score(degrees, y_hat)
-# RMSE = np.sqrt(RSS / n)
+# R², RMSE
+R2   = r2_score(degrees, y_hat)
+RMSE = np.sqrt(RSS / n)
 
-# # AIC, BIC
-# AIC = n*np.log(RSS/n) + 2*k
-# BIC = n*np.log(RSS/n) + k*np.log(n)
+# AIC, BIC
+AIC = n*np.log(RSS/n) + 2*k
+BIC = n*np.log(RSS/n) + k*np.log(n)
 
-# # F-test vs 常数模型
-# RSS_null = np.sum((degrees - degrees.mean())**2)
-# df_full  = n - k
-# df_null  = n - 1
-# F  = ((RSS_null - RSS) / (df_null - df_full)) / (RSS / df_full)
-# pF = 1 - stats.f.cdf(F, df_null - df_full, df_full)
+# F-test vs 常数模型
+RSS_null = np.sum((degrees - degrees.mean())**2)
+df_full  = n - k
+df_null  = n - 1
+F  = ((RSS_null - RSS) / (df_null - df_full)) / (RSS / df_full)
+pF = 1 - stats.f.cdf(F, df_null - df_full, df_full)
 
-# print(f"R²={R2:.3f}, RMSE={RMSE:.3f}, AIC={AIC:.1f}, BIC={BIC:.1f}, F={F:.2f}, p={pF:.3g}")
+print(f"R²={R2:.3f}, RMSE={RMSE:.3f}, AIC={AIC:.1f}, BIC={BIC:.1f}, F={F:.2f}, p={pF:.3g}")
 
-# # k-fold CV (e.g. 5-fold, 100 repeats)
-# rs = ShuffleSplit(n_splits=100, test_size=0.2, random_state=0)
-# mse_cv = []
-# for train, test in rs.split(cues):
-#     popt_i, _ = curve_fit(gaussian, cues[train], degrees[train], p0=popt, bounds=bounds)
-#     y_pred = gaussian(cues[test], *popt_i)
-#     mse_cv.append(mean_squared_error(degrees[test], y_pred))
-# print("CV-MSE=", np.mean(mse_cv))
+# k-fold CV (e.g. 5-fold, 100 repeats)
+rs = ShuffleSplit(n_splits=100, test_size=0.2, random_state=0)
+mse_cv = []
+for train, test in rs.split(cues):
+    popt_i, _ = curve_fit(gaussian, cues[train], degrees[train], p0=popt, bounds=bounds)
+    y_pred = gaussian(cues[test], *popt_i)
+    mse_cv.append(mean_squared_error(degrees[test], y_pred))
+print("CV-MSE=", np.mean(mse_cv))
 
 # %%
 # # #### Community CUE as a function of interaction strength
@@ -608,4 +614,48 @@ plt.show()
 # plt.show()
 
 
-# %%
+# %% gamma
+colors = ["red", "green", "blue"]
+communities = ["Comm1", "Comm2", "Comm3"]
+
+fig, axes = plt.subplots(1, 3, figsize=(15, 4), sharey=True)
+
+for i, comm in enumerate(communities):
+    # 收集所有 replicate 的数据
+    cue, degree = get_all_replicate_data(df, comm, range(51, 101))
+    mask = degree > 0.01
+    cue = cue[mask]
+    degree = degree[mask]
+
+    # 拟合 generalized gamma
+    p0 = [np.mean(degree), 1.0, 2.0, np.min(cue), max(np.std(cue), 0.01)]
+    bounds = ([0, 0.01, 0.01, np.min(cue)-0.01, 1e-4],
+              [10*np.max(degree), 10, 10, np.max(cue)+0.01, 1.0])
+    try:
+        params, _ = curve_fit(gengamma_regression, cue, degree, p0=p0, bounds=bounds)
+    except:
+        print(f"Fit failed for {comm}")
+        continue
+
+    cue_sorted = np.sort(cue)
+    fitted_y = gengamma_regression(cue_sorted, *params)
+    y_pred_all = gengamma_regression(cue, *params)
+    r2 = r2_score(degree, y_pred_all)
+
+    # Peak
+    peak_idx = np.argmax(fitted_y)
+    peak_cue = cue_sorted[peak_idx]
+    peak_degree = fitted_y[peak_idx]
+
+    # 绘图
+    ax = axes[i]
+    ax.scatter(cue, degree, alpha=0.5, color=colors[i], s=10, label="Data points")
+    ax.plot(cue_sorted, fitted_y, color='black', label="Gamma Fit")
+    ax.axvline(peak_cue, color='gray', linestyle='--', label=f"Peak CUE = {peak_cue:.3f}")
+    ax.set_title(f"{comm} (R² = {r2:.2f})")
+    ax.set_xlabel("CUE")
+    if i == 0:
+        ax.set_ylabel("Degree Centrality")
+    ax.legend()
+plt.tight_layout(rect=[0, 0, 1, 0.92])
+plt.show()

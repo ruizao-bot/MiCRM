@@ -64,6 +64,39 @@ def generate_l_tensor(N, M, N_modules, s_ratio, λ):
     l_tensor = np.array([modular_leakage(M, N_modules, s_ratio, λ) for _ in range(N)])
     return l_tensor
 
+def compute_CUE(sol, N, u, R0, l, m):
+    """
+    Compute the community Carbon Use Efficiency (CUE) based on the weighted average of species CUE.
+    
+    Parameters:
+    sol: ODE solution object (output of solve_ivp)
+    N: Number of species (consumers)
+    u: Resource uptake matrix (N × M)
+    R0: Initial resource concentration (M,)
+    leakge rate: Leakage fraction for each species N (M,M)
+    m: Maintenance cost for each species (N,)
+
+    Returns:
+    community_CUE: The weighted average of species CUE
+    species_CUE: Individual CUE for each species (N,)
+    """
+
+    # Extract the steady-state biomass (last time point)
+    C_values = sol.y[:N, -1]  # Shape (N,)
+
+    # Compute total resource uptake per species
+    total_uptake = np.sum(u * R0, axis=1)  # Shape (N,)
+    
+    # Compute net resource uptake (adjusted for leakage and metabolism)
+    net_uptake = np.sum(u * R0 * (1 - np.sum(l, axis=1)), axis=1) - m  # Shape (N,)
+    
+    # Compute species-level CUE
+    species_CUE = net_uptake / total_uptake  # Shape (N,)
+
+    # Compute community CUE as the weighted average of species CUE
+    community_CUE = np.sum(C_values * species_CUE) / np.sum(C_values)
+
+    return community_CUE, species_CUE
 
 def solve_micrm(
     N, M, u, l, m, lambda_alpha, rho, omega, C0, R0,
@@ -145,18 +178,32 @@ def solve_elv(alpha, r, C0, t_span=(0, 50000), t_eval=None):
     sol = solve_ivp(dCdt_elv, t_span, C0, t_eval=t_eval, method="BDF")
     return sol
 
-def compute_Rstar(m, u, λ, R0):
+
+def average_cosine_similarity(u):
     """
-    Compute R*_i for each species i and each resource a.
-    Returns a matrix of shape (N_species, N_resources).
+    Compute average cosine similarity (niche overlap) for a community.
+    u: (N_species, N_resources) uptake matrix
+    Returns: scalar average cosine similarity
     """
-    # m: (N_species,)
-    # u: (N_species, N_resources)
-    # l: (N_species, N_resources)
-    # R0: (N_resources,)
-    numerator = m[:, np.newaxis]  # shape (N_species, 1)
-    denominator = u * (1 - λ) * R0  # shape (N_species, N_resources)
-    # Avoid division by zero
-    denominator = np.where(denominator == 0, np.nan, denominator)
-    Rstar = numerator / denominator  # shape (N_species, N_resources)
-    return Rstar
+    N = u.shape[0]
+    if N < 2:
+        return np.nan
+    # Normalize each row (species vector)
+    norms = np.linalg.norm(u, axis=1, keepdims=True)
+    u_norm = u / (norms + 1e-12)
+    # Cosine similarity matrix
+    sim_matrix = np.dot(u_norm, u_norm.T)
+    # Exclude diagonal, average over all pairs
+    mask = ~np.eye(N, dtype=bool)
+    avg_sim = np.sum(sim_matrix[mask]) / (N * (N - 1))
+    return avg_sim
+
+
+def depletion_steady(rho, omega, R_final):
+
+    inflow_rate   = rho.sum()          
+    outflow_rate  = np.sum(omega * R_final) 
+
+    # ---- 消耗比例 ----
+    depletion_frac = 1.0 - outflow_rate / (inflow_rate)
+    return depletion_frac
