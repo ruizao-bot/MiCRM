@@ -1,26 +1,24 @@
-# Ignore everything by default
-*
 
-# Keep these directories and contents
 !code/
 !code/**
-!code/R/
-!code/R/**
-!results/
 !data/
-community_coalescence.ipynb
+!results/
+!results/**
 
-# Ignore caches and temp folders
-code/__pycache__/
-code/.ipynb_checkpoints/
+micrm/
+micrm/**
+
+sanbox/
+sanbox/**
+
 __pycache__/
+**/__pycache__/
 .ipynb_checkpoints/
+**/.ipynb_checkpoints/
 .vscode/
+.virtual_documents/
+
 *.pyc
 *.log
 *.tmp
 .DS_Store
-
-# Ignore Jupyter checkpoints anywhere
-**/.ipynb_checkpoints/
-
