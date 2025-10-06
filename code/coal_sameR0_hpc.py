@@ -4,6 +4,11 @@ import pandas as pd
 import os, sys
 code_path = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(code_path)
+
+# Project root and data directory (absolute paths)
+project_root = os.path.abspath(os.path.join(code_path, os.pardir))
+data_dir = os.path.join(project_root, "data")
+
 import param
 def compute_uptake_variance(u, N):
     """Return a list of uptake variances for each species."""
@@ -166,11 +171,13 @@ def simulate(seed):
     return species_data
 
 if __name__ == "__main__":
-    with open('seeds.txt', 'r') as f:
+    seeds_file = os.path.join(code_path, 'seeds.txt')
+    with open(seeds_file, 'r') as f:
         seeds = [int(line.strip()) for line in f]
 
     with Pool(cpu_count()) as pool:
         all_species_data_nested = pool.map(simulate, seeds)
     all_species_data = [row for seed_result in all_species_data_nested if seed_result for row in seed_result]
+    os.makedirs(data_dir, exist_ok=True)
     df = pd.DataFrame(all_species_data)
-    df.to_csv("../data/coal.csv", index=False)
+    df.to_csv(os.path.join(data_dir, "coal.csv"), index=False)

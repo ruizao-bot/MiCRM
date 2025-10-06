@@ -1,7 +1,14 @@
 import numpy as np
 import os
 import sys
-sys.path.append(os.path.expanduser("~/Documents/MiCRM/code"))
+# Ensure the repository's `code` directory (where this file lives) is on sys.path
+# This makes imports like `import param` and `import CUE` robust regardless of CWD.
+script_dir = os.path.abspath(os.path.dirname(__file__))
+sys.path.append(script_dir)
+
+# Project root and results directory (absolute paths)
+project_root = os.path.abspath(os.path.join(script_dir, os.pardir))
+results_dir = os.path.join(project_root, "results")
 import param
 import CUE
 import pandas as pd
@@ -216,7 +223,8 @@ axes[2].tick_params(which='both', direction='in')
 axes[2].grid(False)
 
 plt.tight_layout(rect=[0, 0, 0.85, 1])
-plt.savefig("../results/biomass_dynamics.pdf", format="pdf", bbox_inches="tight")
+os.makedirs(results_dir, exist_ok=True)
+plt.savefig(os.path.join(results_dir, "biomass_dynamics.pdf"), format="pdf", bbox_inches="tight")
 plt.show()
 
 
@@ -253,7 +261,8 @@ axes[2].tick_params(which='both', direction='in')
 axes[2].grid(False)
 
 plt.tight_layout()
-plt.savefig("../results/resource_dynamics.pdf", format="pdf", bbox_inches="tight")
+os.makedirs(results_dir, exist_ok=True)
+plt.savefig(os.path.join(results_dir, "resource_dynamics.pdf"), format="pdf", bbox_inches="tight")
 plt.show()
 
 

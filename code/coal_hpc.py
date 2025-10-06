@@ -120,4 +120,8 @@ if __name__ == "__main__":
         all_species_data_nested = pool.map(simulate, seeds)
     all_species_data = [row for seed_result in all_species_data_nested if seed_result for row in seed_result]
     df = pd.DataFrame(all_species_data)
-    df.to_csv("../data/coal_recursive_0omega.csv", index=False)
+    # Save to the project's data directory (use code_path so it's independent of cwd)
+    data_dir = os.path.abspath(os.path.join(code_path, os.pardir, "data"))
+    os.makedirs(data_dir, exist_ok=True)
+    outpath = os.path.join(data_dir, "coal_recursive_0omega.csv")
+    df.to_csv(outpath, index=False)
