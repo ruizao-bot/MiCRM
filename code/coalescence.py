@@ -21,8 +21,8 @@ np.random.seed(37)
 N_pool = 1000  # Species pool size
 M_pool = 200    # Resource pool size
 λ = 0.2        # Total leakage rate
-N_modules = 1  # Number of modules
-s_ratio = 1 # Modularity ratio
+N_modules = 50  # Number of modules
+s_ratio = 10 # Modularity ratio
 N1 = 100
 M1 = 50
 m1 = np.full(N1, 0.2)
@@ -99,7 +99,25 @@ C0_3 = np.concatenate([ce1, ce2])
 R0_3 = np.full(M1, 1)#re1 + re2
 
 sol3 = param.solve_micrm(N3, M3, u3, l3, m3, lambda_alpha3, rho3, omega3, C0_3, R0_3, t_span)
+# ----------------- Survival rate calculation -----------------
+# Species with final abundance > SURV_THRESH are considered survivors
+SURV_THRESH = 1e-5
+ce3 = sol3.y[:N3, -1]
+# counts
+n_surv1 = int(np.sum(ce1 > SURV_THRESH))
+n_surv2 = int(np.sum(ce2 > SURV_THRESH))
+n_surv3 = int(np.sum(ce3 > SURV_THRESH))
+# rates
+surv_rate1 = n_surv1 / float(N1) if N1 > 0 else 0.0
+surv_rate2 = n_surv2 / float(N2) if N2 > 0 else 0.0
+surv_rate3 = n_surv3 / float(N3) if N3 > 0 else 0.0
+
+print(f"Survival threshold = {SURV_THRESH}")
+print(f"Community1 survivors: {n_surv1}/{N1} => {surv_rate1:.3f}")
+print(f"Community2 survivors: {n_surv2}/{N2} => {surv_rate2:.3f}")
+print(f"Community3 survivors: {n_surv3}/{N3} => {surv_rate3:.3f}")
 #############################################
+
 import matplotlib.cm as cm
 
 # Plot biomass change over time with color gradient for species

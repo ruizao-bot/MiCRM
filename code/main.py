@@ -1,17 +1,18 @@
 import numpy as np
+import os
 import matplotlib.pyplot as plt
 from scipy.integrate import solve_ivp
 import param
 
 
 # parameters
-N = 10  # consumer number
-M = 5  # resource number
+N = 50  # consumer number
+M = 25  # resource number
 λ = 0.3  # total leakage rate
 λ_u = np.ones(N)
 
-N_modules = 1 #  module number of consumer to resource
-s_ratio = 1.0 
+N_modules = 2 #  module number of consumer to resource
+s_ratio = 10.0 
 # When s_ratio = 1: Resources have a uniform leakage probability；
 # When s_ratio > 1: Increases leakage probability within the same module, Increases leakage probability between adjacent modules.
 
@@ -23,51 +24,20 @@ lambda_alpha = np.full(M, λ)  # total leakage rate for each resource
 
 
 m = np.full(N, 0.2)  # mortality rate of N consumers
-rho = np.full(M, 0.6)  # input of M resources
-omega = np.full(M, 0.1)  # decay rate of M resources
+rho = np.full(M, 0.5)  # input of M resources
+omega = np.full(M, 0.5)  # decay rate of M resources
 
 l = param.generate_l_tensor(N, M, N_modules, s_ratio, λ) # a tensor for all consumers' leakage matrics
 
-
-# ode
-def dCdt_Rdt(t, y):
-    C = y[:N]
-    R = y[N:]
-    dCdt = np.zeros(N)
-    dRdt = np.zeros(M)
-    
-    for i in range(N):
-        dCdt[i] = sum(C[i] * R[alpha] * u[i, alpha] * (1 - lambda_alpha[alpha]) for alpha in range(M)) - C[i] * m[i]
-    
-    for alpha in range(M):
-        dRdt[alpha] = rho[alpha] - R[alpha] * omega[alpha]
-        dRdt[alpha] -= sum(C[i] * R[alpha] * u[i, alpha] for i in range(N))
-        dRdt[alpha] += sum(sum(C[i] * R[beta] * u[i, beta] * l[i, beta, alpha] for beta in range(M)) for i in range(N))
-    
-    return np.concatenate([dCdt, dRdt])
-
 # intial value
-C0 = np.full(N,0.01)  # consumer
-R0 = np.full(M,1)   # resource
-Y0 = np.concatenate([C0, R0])
-
+C0 = np.full(N, 0.01)  # consumer
+R0 = np.full(M, 1)   # resource
 
 # time sacle
-t_span = (0, 200)
-t_eval = np.linspace(*t_span, 300)
+t_span = (0, 200000)
 
 # solve ode
-sol = solve_ivp(dCdt_Rdt, t_span, Y0, t_eval=t_eval)
-# CUE
-# Compute CUE at each time step
-CUE = np.zeros((N, len(sol.t)))
-for i, t in enumerate(sol.t):
-    C = sol.y[:N, i]  # Consumer abundances at time t
-    R = sol.y[N:, i]  # Resource concentrations at time t
-    total_uptake = u @ R  # (N × M) @ (M,) -> (N,)
-    net_uptake = total_uptake * (1 - λ) - m  # Adjusted for leakage and metabolism
-    CUE[:, i] = net_uptake / total_uptake  # Compute CUE per consumer
-
+sol = param.solve_micrm(N, M, u, l, m, lambda_alpha, rho, omega, C0, R0, t_span)
 # plot
 plt.figure(figsize=(10, 5))
 for i in range(N):
@@ -80,18 +50,16 @@ plt.legend()
 plt.title('Dynamics of Consumers and Resources')
 plt.show()
 
-
-# plot CUE change
-plt.figure(figsize=(10, 5))
-
-for i in range(N):
-    plt.plot(sol.t, CUE[i], label=f'Consumer {i+1}')
-
-plt.xlabel('Time')
-plt.ylabel('Carbon Use Efficiency (CUE)')
-plt.title('CUE Dynamics Over Time')
-plt.legend()
-plt.show()
-
 # system analysis
+def richness(abundances, thresh=1e-5):
+    """Return number of species with abundance > thresh."""
+    return int(np.sum(np.asarray(abundances) > thresh))
+
+
+# Compute richness from final abundances
+final_C = sol.y[:N, -1]
+SURV_THRESH = 1e-5
+rich = richness(final_C, SURV_THRESH)
+print(f"Final species richness (abundance > {SURV_THRESH}): {rich} / {N}")
+
 
