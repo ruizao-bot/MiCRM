@@ -207,3 +207,49 @@ def depletion_steady(rho, omega, R_final):
     # ---- 消耗比例 ----
     depletion_frac = 1.0 - outflow_rate / (inflow_rate)
     return depletion_frac
+
+def calculate_effective_leakage(u, l):
+    """
+    Calculate effective leakage vector for each consumer.
+    
+    L_i^eff = Σ_{α=1}^{M} u_i_α * l_i_α
+    
+    Parameters:
+    u: uptake matrix (N x M)
+    l: leakage tensor (N x M x M)
+    
+    Returns:
+    L_eff: effective leakage matrix (N x M)
+    """
+    N, M = u.shape
+    L_eff = np.zeros((N, M))
+    
+    for i in range(N):
+        for alpha in range(M):
+            # L_i^eff = Σ_{α=1}^{M} u_i_α * l_i_α
+            L_eff[i] += u[i, alpha] * l[i, alpha, :]
+    
+    return L_eff
+
+def calculate_community_feedback(L_eff, u):
+    N, M = L_eff.shape
+    total_similarity = 0.0
+    
+    for i in range(N):
+        for j in range(N):
+            if i != j:
+                dot_product = np.dot(L_eff[i], u[j])
+                norm_L_eff = np.linalg.norm(L_eff[i])
+                norm_u_j = np.linalg.norm(u[j])
+                
+                if norm_L_eff > 0 and norm_u_j > 0:
+                    cosine_sim = dot_product / (norm_L_eff * norm_u_j)
+                    total_similarity += cosine_sim
+    
+
+    if N > 1:
+        C_feed = (1 * total_similarity) / (N * (N - 1))
+    else:
+        C_feed = 0.0
+    
+    return C_feed

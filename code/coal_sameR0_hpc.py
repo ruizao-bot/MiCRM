@@ -65,7 +65,21 @@ def simulate(seed):
     R0_3 = np.full(M1, 1)#sol1.y[N1:, -1] + sol2.y[N2:, -1]
 
     sol3 = param.solve_micrm(N3, M3, u3, l3, m3, lambda_alpha3, rho3, omega3, C0_3, R0_3, t_span)
+    # calculate community facilitation
+    # Community 1
+    L_eff1 = param.calculate_effective_leakage(u1, l1)
+    C_feed1 = param.calculate_community_feedback(L_eff1, u1)
+    print(f"Community 1 - Community feedback (C_feed): {C_feed1:.6f}")
 
+    # Community 2
+    L_eff2 = param.calculate_effective_leakage(u2, l2)
+    C_feed2 = param.calculate_community_feedback(L_eff2, u2)
+    print(f"Community 2 - Community feedback (C_feed): {C_feed2:.6f}")
+
+    # Community 3 (merged)
+    L_eff3 = param.calculate_effective_leakage(u3, l3)
+    C_feed3 = param.calculate_community_feedback(L_eff3, u3)
+    print(f"Community 3 - Community feedback (C_feed): {C_feed3:.6f}")
     # 计算 CUE
     community_CUE1, species_CUE1 = param.compute_CUE(sol1, N1, u1, R0_1, l1, m1)
     community_CUE2, species_CUE2 = param.compute_CUE(sol2, N2, u2, R0_2, l2, m2)
@@ -134,7 +148,8 @@ def simulate(seed):
             "Dominant_Community": dominant,
             "Niche_Overlap":  niche_overlap2,
             "Depletion": depletion2,
-            "Niche_Overlap_surv": niche_overlap2_surv
+            "Niche_Overlap_surv": niche_overlap2_surv,
+            "Facilitation": C_feed2
         })
 
     for i in range(len(species_CUE3)):
@@ -151,7 +166,8 @@ def simulate(seed):
             "Dominant_Community": dominant,
             "Niche_Overlap":  niche_overlap3,
             "Depletion": depletion3,
-            "Niche_Overlap_surv": niche_overlap3_surv
+            "Niche_Overlap_surv": niche_overlap3_surv,
+            "Facilitation": C_feed3
         })
 
     # Calculate uptake variance for each species in each community
