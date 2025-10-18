@@ -27,7 +27,7 @@ m = np.full(N, 0.2)  # mortality rate of N consumers
 rho = np.full(M, 0.5)  # input of M resources
 omega = np.full(M, 0.5)  # decay rate of M resources
 
-l = param.generate_l_tensor(N, M, N_modules, s_ratio, λ) # a tensor for all consumers' leakage matrics
+l = param.generate_l_tensor(N, M, N_modules, s_ratio, λ, u) # a tensor for all consumers' leakage matrics
 
 # intial value
 C0 = np.full(N, 0.01)  # consumer

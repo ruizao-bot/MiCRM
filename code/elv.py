@@ -22,7 +22,7 @@ M2 = 50
 m2 =  np.full(N2, 0.2)#truncnorm.rvs((0 - 1) / 0.01, np.inf, loc=1, scale=0.01, size=N2)
 # Generate uptake matrix and leakage tensor for the species pool
 u_pool = param.modular_uptake(N_pool, M_pool, N_modules, s_ratio)
-l_pool = param.generate_l_tensor(N_pool, M_pool, N_modules, s_ratio, λ)
+l_pool = param.generate_l_tensor(N_pool, M_pool, N_modules, s_ratio, λ, u_pool)
 # Set rho and omega for the resource pool
 rho_pool = np.full(M_pool, 0.6)
 omega_pool = np.full(M_pool, 0.1)
@@ -189,7 +189,7 @@ m = truncnorm.rvs((0 - 1) / 0.01, np.inf, loc=1, scale=0.01, size=N)
 
 # Generate uptake matrix and leakage tensor for the species pool
 u_pool = param.modular_uptake(N_pool, M_pool, N_modules, s_ratio)
-l_pool = param.generate_l_tensor(N_pool, M_pool, N_modules, s_ratio, λ)
+l_pool = param.generate_l_tensor(N_pool, M_pool, N_modules, s_ratio, λ, u_pool)
 # Set rho and omega for the resource pool
 rho_pool = np.full(M_pool, 0.5)
 omega_pool = np.full(M_pool, 0.5)
@@ -351,7 +351,7 @@ N_modules = 1
 s_ratio = 1
 
 u = param.modular_uptake(N, M, N_modules, s_ratio)
-l_tensor = param.generate_l_tensor(N, M, N_modules, s_ratio, λ)
+l_tensor = param.generate_l_tensor(N, M, N_modules, s_ratio, λ, u)
 lambda_alpha = np.full(M, λ)
 
 

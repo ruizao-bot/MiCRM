@@ -34,7 +34,7 @@ for s_ratio in s_ratio_range:
 
     # 1. Generate uptake and leakage matrices for the current s_ratio
     u = param.modular_uptake(N, M, N_modules, s_ratio)
-    l = param.generate_l_tensor(N, M, N_modules, s_ratio, λ)
+    l = param.generate_l_tensor(N, M, N_modules, s_ratio, λ, u)
 
     # 2. Calculate the effective leakage matrix and average niche overlap
     L_eff = param.calculate_effective_leakage(u, l)

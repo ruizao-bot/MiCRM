@@ -21,4 +21,6 @@ __pycache__/
 *.pyc
 *.log
 *.tmp
+*.pdf
+
 .DS_Store

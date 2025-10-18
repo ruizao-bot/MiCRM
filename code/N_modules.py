@@ -47,7 +47,7 @@ def run_coalescence(N_modules_run, seed=None, do_plot=False):
 
     # Generate uptake/leakage pool for this N_modules
     u_pool = param.modular_uptake(N_pool, M_pool, N_modules_run, s_ratio)
-    l_pool = param.generate_l_tensor(N_pool, M_pool, N_modules_run, s_ratio, λ)
+    l_pool = param.generate_l_tensor(N_pool, M_pool, N_modules_run, s_ratio, λ, u_pool)
 
     # Community 1 sampling
     species_indices1 = np.random.choice(N_pool, N1, replace=False)

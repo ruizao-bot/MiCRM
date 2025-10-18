@@ -22,7 +22,7 @@ def simulate(seed):
     m1, m2 = np.full(N1, 0.2), np.full(N2, 0.2)
 
     u_pool = param.modular_uptake(N_pool, M_pool, N_modules, s_ratio)
-    l_pool = param.generate_l_tensor(N_pool, M_pool, N_modules, s_ratio, λ)
+    l_pool = param.generate_l_tensor(N_pool, M_pool, N_modules, s_ratio, λ, u_pool)
     rho_pool, omega_pool = np.full(M_pool, 0.6), np.full(M_pool, 0.1)
     t_span = (0, 100000)  # Simulation time span
     species_indices1 = np.random.choice(N_pool, N1, replace=False)

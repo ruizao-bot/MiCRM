@@ -35,33 +35,49 @@ def modular_uptake(N, M, N_modules, s_ratio):
     return u
 
 
-def modular_leakage(M, N_modules, s_ratio, λ):
+def modular_leakage(M, N_modules, s_ratio, λ, u=None):
     assert N_modules <= M, "N_modules must be less than or equal to M"
 
-    # Baseline
     sR = M // N_modules
     dR = M - (N_modules * sR)
 
-    # Get module sizes and add to make to M
     diffR = np.full(N_modules, sR, dtype=int)
-    diffR[np.random.choice(N_modules, dR, replace=False)] += 1
+    if dR > 0:
+        diffR[np.random.choice(N_modules, dR, replace=False)] += 1
     mR = [list(range(x - 1, y)) for x, y in zip((np.cumsum(diffR) - diffR + 1), np.cumsum(diffR))]
+
+    if u is not None:
+        uptake = np.asarray(u, dtype=float)
+        if uptake.shape[-1] != M:
+            raise ValueError("u must have M columns")
+        resource_bias = np.sum(uptake, axis=0)
+        module_bias = np.array([np.sum(resource_bias[idx]) for idx in mR], dtype=float)
+        max_bias = np.max(module_bias)
+        if max_bias <= 0.0:
+            module_bias = np.ones_like(module_bias)
+            max_bias = 1.0
+    else:
+        module_bias = np.ones(N_modules, dtype=float)
+        max_bias = 1.0
+
+    module_bias_norm = module_bias / max_bias
 
     l = np.random.rand(M, M)
 
-    for i, x in enumerate(mR):
-        for j, y in enumerate(mR):
-            if i == j or i + 1 == j:
-                l[np.ix_(x, y)] *= s_ratio
+    for i, src_idx in enumerate(mR):
+        for j, tgt_idx in enumerate(mR):
+            bias_weight = 1.0 + (s_ratio - 1.0) * module_bias_norm[j]
+            l[np.ix_(src_idx, tgt_idx)] *= bias_weight
 
-    for i in range(M):
-        l[i, :] = λ * l[i, :] / np.sum(l[i, :])
+    row_sums = np.sum(l, axis=1)
+    row_sums[row_sums == 0.0] = 1.0
+    l = λ * l / row_sums[:, None]
 
     return l
 
 
-def generate_l_tensor(N, M, N_modules, s_ratio, λ):
-    l_tensor = np.array([modular_leakage(M, N_modules, s_ratio, λ) for _ in range(N)])
+def generate_l_tensor(N, M, N_modules, s_ratio, λ, u=None):
+    l_tensor = np.array([modular_leakage(M, N_modules, s_ratio, λ, u) for _ in range(N)])
     return l_tensor
 
 def compute_CUE(sol, N, u, R0, l, m):
