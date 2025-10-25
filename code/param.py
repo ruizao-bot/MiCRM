@@ -31,44 +31,40 @@ def modular_uptake(N, M, N_modules, s_ratio):
         
     # Normalize each row
     for i in range(N):
-        u[i, :] /= np.sum(u[i, :])
+        u[i, :] = u[i, :] / np.sum(u[i, :]) * 5
     return u
 
 
-def modular_leakage(M, N_modules, s_ratio, λ, u=None):
+def modular_leakage(M, N_modules, s_ratio, λ, u):
     assert N_modules <= M, "N_modules must be less than or equal to M"
 
+    # 划分模块
     sR = M // N_modules
     dR = M - (N_modules * sR)
-
     diffR = np.full(N_modules, sR, dtype=int)
     if dR > 0:
         diffR[np.random.choice(N_modules, dR, replace=False)] += 1
     mR = [list(range(x - 1, y)) for x, y in zip((np.cumsum(diffR) - diffR + 1), np.cumsum(diffR))]
 
-    if u is not None:
-        uptake = np.asarray(u, dtype=float)
-        if uptake.shape[-1] != M:
-            raise ValueError("u must have M columns")
-        resource_bias = np.sum(uptake, axis=0)
-        module_bias = np.array([np.sum(resource_bias[idx]) for idx in mR], dtype=float)
-        max_bias = np.max(module_bias)
-        if max_bias <= 0.0:
-            module_bias = np.ones_like(module_bias)
-            max_bias = 1.0
-    else:
-        module_bias = np.ones(N_modules, dtype=float)
-        max_bias = 1.0
+    # 基于u的模块权重
+    uptake = np.asarray(u, dtype=float)
+    resource_demand = np.sum(uptake, axis=0)
+    module_demand = np.array([np.sum(resource_demand[idx]) for idx in mR], dtype=float)
+    mean_demand = np.mean(module_demand)
 
-    module_bias_norm = module_bias / max_bias
+    module_norm = module_demand / mean_demand
+    module_weights = module_norm ** s_ratio
 
+    # 赋给每个资源
+    resource_weights = np.ones(M, dtype=float)
+    for idx, module in enumerate(mR):
+        resource_weights[module] = module_weights[idx]
+
+    # 生成泄漏矩阵并加权
     l = np.random.rand(M, M)
+    l *= resource_weights[np.newaxis, :]
 
-    for i, src_idx in enumerate(mR):
-        for j, tgt_idx in enumerate(mR):
-            bias_weight = 1.0 + (s_ratio - 1.0) * module_bias_norm[j]
-            l[np.ix_(src_idx, tgt_idx)] *= bias_weight
-
+    # 行归一化到 λ
     row_sums = np.sum(l, axis=1)
     row_sums[row_sums == 0.0] = 1.0
     l = λ * l / row_sums[:, None]
@@ -76,11 +72,12 @@ def modular_leakage(M, N_modules, s_ratio, λ, u=None):
     return l
 
 
-def generate_l_tensor(N, M, N_modules, s_ratio, λ, u=None):
-    l_tensor = np.array([modular_leakage(M, N_modules, s_ratio, λ, u) for _ in range(N)])
+def generate_l_tensor(N, M, N_modules, s_ratio, λ, u):
+    l_template = modular_leakage(M, N_modules, s_ratio, λ, u)
+    l_tensor = np.repeat(l_template[np.newaxis, :, :], N, axis=0)
     return l_tensor
 
-def compute_CUE(sol, N, u, R0, l, m):
+def compute_CUE(sol, N, u, R0, λ, m):
     """
     Compute the community Carbon Use Efficiency (CUE) based on the weighted average of species CUE.
     
@@ -89,7 +86,7 @@ def compute_CUE(sol, N, u, R0, l, m):
     N: Number of species (consumers)
     u: Resource uptake matrix (N × M)
     R0: Initial resource concentration (M,)
-    leakge rate: Leakage fraction for each species N (M,M)
+    λ: Leakage rate (scalar)
     m: Maintenance cost for each species (N,)
 
     Returns:
@@ -104,7 +101,7 @@ def compute_CUE(sol, N, u, R0, l, m):
     total_uptake = np.sum(u * R0, axis=1)  # Shape (N,)
     
     # Compute net resource uptake (adjusted for leakage and metabolism)
-    net_uptake = np.sum(u * R0 * (1 - np.sum(l, axis=1)), axis=1) - m  # Shape (N,)
+    net_uptake = np.sum(u * R0 * (1 - λ), axis=1) - m  # Shape (N,)
     
     # Compute species-level CUE
     species_CUE = net_uptake / total_uptake  # Shape (N,)
@@ -215,15 +212,6 @@ def average_cosine_similarity(u):
     return avg_sim
 
 
-def depletion_steady(rho, omega, R_final):
-
-    inflow_rate   = rho.sum()          
-    outflow_rate  = np.sum(omega * R_final) 
-
-    # ---- 消耗比例 ----
-    depletion_frac = 1.0 - outflow_rate / (inflow_rate)
-    return depletion_frac
-
 def calculate_effective_leakage(u, l):
     """
     Calculate effective leakage vector for each consumer.
@@ -269,3 +257,14 @@ def calculate_community_feedback(L_eff, u):
         C_feed = 0.0
     
     return C_feed
+
+def community_level_competition(u):
+    """
+    Compute average shared uptake demand (u @ u^T) excluding self-terms.
+    """
+    overlap = u @ u.T
+    N = overlap.shape[0]
+    if N < 2:
+        return np.nan
+    total = np.sum(overlap) - np.trace(overlap)
+    return total / (N * (N - 1))
