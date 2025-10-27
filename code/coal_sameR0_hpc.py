@@ -81,36 +81,24 @@ def simulate(seed):
     C_feed3 = param.calculate_community_feedback(L_eff3, u3)
     print(f"Community 3 - Community feedback (C_feed): {C_feed3:.6f}")
     # 计算 CUE
-    community_CUE1, species_CUE1 = param.compute_CUE(sol1, N1, u1, R0_1, l1, m1)
-    community_CUE2, species_CUE2 = param.compute_CUE(sol2, N2, u2, R0_2, l2, m2)
-    community_CUE3, species_CUE3 = param.compute_CUE(sol3, N3, u3, R0_3, l3, m3)
+    community_CUE1, species_CUE1 = param.compute_CUE(sol1, N1, u1, R0_1, lambda_alpha1, m1)
+    community_CUE2, species_CUE2 = param.compute_CUE(sol2, N2, u2, R0_2, lambda_alpha2, m2)
+    community_CUE3, species_CUE3 = param.compute_CUE(sol3, N3, u3, R0_3, lambda_alpha3, m3)
 
     C_final1, C_final2, C_final3 = sol1.y[:N1, -1], sol2.y[:N2, -1], sol3.y[:N3, -1]
     total_1, total_2 = np.sum(C_final3[:N1]), np.sum(C_final3[N1:])
     dominant = "Community 1" if total_1 > total_2 else "Community 2"
 
-    # Get final resource abundances for each community
-    R_final1 = sol1.y[N1:, -1]  # resources are after consumers in y
-    R_final2 = sol2.y[N2:, -1]
-    R_final3 = sol3.y[N3:, -1]
-
-    # Compute depletion for each community
-    depletion1 = param.depletion_steady(rho1, omega1, R_final1)
-    depletion2 = param.depletion_steady(rho2, omega2, R_final2)
-    depletion3 = param.depletion_steady(rho3, omega3, R_final3)
     # For each community, filter surviving species and calculate average competition among them
     survivors1 = np.where(C_final1 > 1e-5)[0]
     survivors2 = np.where(C_final2 > 1e-5)[0]
     survivors3 = np.where(C_final3 > 1e-5)[0]
 
     # Calculate niche overlap (cosine similarity) for all and for survivors
-    niche_overlap1 = param.average_cosine_similarity(u1)
-    niche_overlap2 = param.average_cosine_similarity(u2)
-    niche_overlap3 = param.average_cosine_similarity(u3)
+    competition1 = param.community_level_competition(u1)
+    competition2 = param.community_level_competition(u2)
+    competition3 = param.community_level_competition(u3)
 
-    niche_overlap1_surv = param.average_cosine_similarity(u1[survivors1, :]) if len(survivors1) > 1 else np.nan
-    niche_overlap2_surv = param.average_cosine_similarity(u2[survivors2, :]) if len(survivors2) > 1 else np.nan
-    niche_overlap3_surv = param.average_cosine_similarity(u3[survivors3, :]) if len(survivors3) > 1 else np.nan
 
     # Calculate community CUE for survivors
     community_CUE1_surv = (np.sum(C_final1[survivors1] * species_CUE1[survivors1]) / np.sum(C_final1[survivors1]))
@@ -129,9 +117,8 @@ def simulate(seed):
             "Abundance": C_final1[i],
             "Total_Abundance": total_1,
             "Dominant_Community": dominant,
-            "Niche_Overlap":  niche_overlap1,
-            "Depletion": depletion1,
-            "Niche_Overlap_surv": niche_overlap1_surv
+            "Competition":  competition1,
+            "Facilitation": C_feed1
         })
 
     for i in range(len(species_CUE2)):
@@ -146,9 +133,7 @@ def simulate(seed):
             "Abundance": C_final2[i],
             "Total_Abundance": total_2,
             "Dominant_Community": dominant,
-            "Niche_Overlap":  niche_overlap2,
-            "Depletion": depletion2,
-            "Niche_Overlap_surv": niche_overlap2_surv,
+            "Competition":  competition2,
             "Facilitation": C_feed2
         })
 
@@ -164,9 +149,7 @@ def simulate(seed):
             "Abundance": C_final3[i],
             "Total_Abundance": total_1 + total_2,
             "Dominant_Community": dominant,
-            "Niche_Overlap":  niche_overlap3,
-            "Depletion": depletion3,
-            "Niche_Overlap_surv": niche_overlap3_surv,
+            "Competition":  competition3,
             "Facilitation": C_feed3
         })
 
