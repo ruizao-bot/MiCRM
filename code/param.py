@@ -31,7 +31,7 @@ def modular_uptake(N, M, N_modules, s_ratio):
         
     # Normalize each row
     for i in range(N):
-        u[i, :] = u[i, :] / np.sum(u[i, :]) * 5
+        u[i, :] = u[i, :] / np.sum(u[i, :])
     return u
 
 
@@ -76,6 +76,32 @@ def generate_l_tensor(N, M, N_modules, s_ratio, λ, u):
     l_template = modular_leakage(M, N_modules, s_ratio, λ, u)
     l_tensor = np.repeat(l_template[np.newaxis, :, :], N, axis=0)
     return l_tensor
+
+
+def compute_maintenance(chi0, epsilon, lambda_scalar, u_matrix):
+    """
+    Compute species maintenance cost vector using the formula:
+        z_alpha = chi0 * (1 + epsilon_alpha) * (1 - lambda) * sum_j u_alpha_j
+
+    Parameters:
+    - chi0: scalar baseline maintenance coefficient
+    - epsilon: array-like of length N (or scalar) with species-specific efficiency term
+    - lambda_scalar: scalar leakage rate (λ)
+    - u_matrix: (N, M) uptake matrix for the species set
+
+    Returns:
+    - m: numpy array of length N with maintenance costs
+    """
+    u = np.asarray(u_matrix, dtype=float)
+    N = u.shape[0]
+    eps = np.asarray(epsilon)
+    if eps.ndim == 0:
+        eps = np.full(N, float(eps))
+    if eps.shape[0] != N:
+        raise ValueError("epsilon must be scalar or have length matching number of species in u_matrix")
+
+    m = chi0 * (1.0 + eps) * (1.0 - float(lambda_scalar)) * np.sum(u, axis=1)
+    return m
 
 def compute_CUE(sol, N, u, R0, λ, m):
     """
@@ -191,7 +217,6 @@ def solve_elv(alpha, r, C0, t_span=(0, 50000), t_eval=None):
     sol = solve_ivp(dCdt_elv, t_span, C0, t_eval=t_eval, method="BDF")
     return sol
 
-
 def average_cosine_similarity(u):
     """
     Compute average cosine similarity (niche overlap) for a community.
@@ -203,7 +228,7 @@ def average_cosine_similarity(u):
         return np.nan
     # Normalize each row (species vector)
     norms = np.linalg.norm(u, axis=1, keepdims=True)
-    u_norm = u / (norms + 1e-12)
+    u_norm = u / (norms)
     # Cosine similarity matrix
     sim_matrix = np.dot(u_norm, u_norm.T)
     # Exclude diagonal, average over all pairs

@@ -38,6 +38,9 @@ t_span = (0, 200000)
 
 # solve ode
 sol = param.solve_micrm(N, M, u, l, m, lambda_alpha, rho, omega, C0, R0, t_span)
+
+community_CUE, species_CUE = param.compute_CUE(sol, N, u, R0, lambda_alpha, m)
+print(species_CUE)
 # plot
 plt.figure(figsize=(10, 5))
 for i in range(N):

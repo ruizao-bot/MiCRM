@@ -24,10 +24,14 @@ s_ratio_max = 10
 
 N1 = 100
 M1 = 50
-m1 = np.full(N1, 0.2)
 N2 = 100
 M2 = 50
-m2 = np.full(N2, 0.2)
+# maintenance cost baseline and per-species epsilon pool
+chi0 = 0.2
+epsilon_pool = np.random.uniform(0, 0.1, N_pool)
+
+N2 = 100
+M2 = 50
 
 # Time span for simulation
 t_span = (0, 5000)
@@ -84,11 +88,18 @@ for b in np.linspace(0.1, 1.0, 51):
     C0_2 = np.full(N1, 0.01) 
     R0_1 = np.full(M1, 1)
     R0_2 = np.full(M2, 1)
-    
+    # Compute maintenance costs for community 1
+    eps1 = epsilon_pool[species_indices1]
+    m1 = param.compute_maintenance(chi0, eps1, λ, u1)
+
     sol1 = param.solve_micrm(N1, M1, u1, l1, m1, lambda_alpha1, rho1, omega1, C0_1, R0_1, t_span)
     ce1 = sol1.y[:N1, -1]  # Consumer abundance at equilibrium
     
     # Simulate Community 2
+    # Compute maintenance costs for community 2
+    eps2 = epsilon_pool[species_indices2]
+    m2 = param.compute_maintenance(chi0, eps2, λ, u2)
+
     sol2 = param.solve_micrm(N2, M2, u2, l2, m2, lambda_alpha2, rho2, omega2, C0_2, R0_2, t_span)
     ce2 = sol2.y[:N2, -1]
     
@@ -97,7 +108,9 @@ for b in np.linspace(0.1, 1.0, 51):
     resource_indices3 = resource_indices1 if M1 >= M2 else resource_indices2
     u3 = u_pool[np.ix_(species_indices3, resource_indices3)]
     
-    m3 = np.concatenate([m1, m2])
+    # Compute maintenance costs for merged community
+    eps3 = epsilon_pool[species_indices3]
+    m3 = param.compute_maintenance(chi0, eps3, λ, u3)
     lambda_alpha3 = np.full(len(resource_indices3), λ)
     omega3 = omega_pool[resource_indices3]
     N3 = N1 + N2
@@ -224,12 +237,12 @@ plt.tight_layout()
 project_root = os.path.abspath(os.path.join(script_dir, os.pardir))
 results_dir = os.path.join(project_root, "results")
 os.makedirs(results_dir, exist_ok=True)
-plot_file = os.path.join(results_dir, 'b_analysis_0.2.png')
+plot_file = os.path.join(results_dir, 'b_analysis_fix_s_ratio.png')
 plt.savefig(plot_file, dpi=300, bbox_inches='tight')
 
 print(f"Analysis plots saved to {plot_file}")
 
 # Save data to CSV for further analysis
-data_file = os.path.join(results_dir, 'b_analysis_data_0.2.csv')
+data_file = os.path.join(results_dir, 'b_analysis.csv')
 df.to_csv(data_file, index=False)
 print(f"Data saved to {data_file}")

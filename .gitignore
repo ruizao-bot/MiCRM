@@ -8,6 +8,8 @@
 micrm/
 micrm/**
 
+sanbox/
+sanbox/**
 
 __pycache__/
 **/__pycache__/

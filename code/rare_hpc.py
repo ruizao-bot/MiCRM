@@ -15,7 +15,9 @@ def simulate(args):
     np.random.seed(seed)
     N_pool, M_pool, λ, N_modules, s_ratio = 1000, 200, 0.2, 1, 1.0
     N1, M1, N2, M2 = 100, 50, 100, 50
-    m1, m2 = np.full(N1, 0.2), np.full(N2, 0.2)
+    # maintenance cost baseline and per-species epsilon pool
+    chi0 = 0.2
+    epsilon_pool = np.random.uniform(0, 0.1, N_pool)
 
     u_pool = param.modular_uptake(N_pool, M_pool, N_modules, s_ratio)
     l_pool = param.generate_l_tensor(N_pool, M_pool, N_modules, s_ratio, λ, u_pool)
@@ -47,6 +49,12 @@ def simulate(args):
     R0_1, R0_2 = np.full(M1, 1.0), np.full(M2, 1.0)
     # Solve for community 1 and 2
     t_span = (0, 3000)
+    # compute maintenance costs per community using param.compute_maintenance
+    eps1 = epsilon_pool[species_indices1]
+    m1 = param.compute_maintenance(chi0, eps1, λ, u1)
+    eps2 = epsilon_pool[species_indices2]
+    m2 = param.compute_maintenance(chi0, eps2, λ, u2)
+
     sol1 = param.solve_micrm(N1, M1, u1, l1, m1, lambda_alpha1, rho1, omega1, C0_1, R0_1, t_span)
     sol2 = param.solve_micrm(N2, M2, u2, l2, m2, lambda_alpha2, rho2, omega2, C0_2, R0_2, t_span)
     ce1 = sol1.y[:N1, -1]
@@ -56,7 +64,9 @@ def simulate(args):
     u3 = u_pool[np.ix_(species_indices3, resource_indices3)]
 
     l3 = l_pool[np.ix_(species_indices3, resource_indices3, resource_indices3)]
-    m3 = np.concatenate([m1, m2])
+    # maintenance for merged community
+    eps3 = epsilon_pool[species_indices3]
+    m3 = param.compute_maintenance(chi0, eps3, λ, u3)
     lambda_alpha3 = np.full(len(resource_indices3), λ)
 
     omega3 = omega_pool[resource_indices3]
@@ -66,10 +76,10 @@ def simulate(args):
     C0_3 = np.concatenate([ce1, ce2*0.01])
     R0_3 = np.full(M1, 1) 
 
-    sol3 = param.solve_micrm(N3, M3, u3, l3, m3, lambda_alpha3, rho3, omega3, C0_3, R0_3)
+    sol3 = param.solve_micrm(N3, M3, u3, l3, m3, lambda_alpha3, rho3, omega3, C0_3, R0_3, t_span)
 
     # --- Community 1 (resident) results ---
-    _, species_CUE1 = CUE.compute_CUE(sol1, N1, u1, R0_1, l1, m1)
+    _, species_CUE1 = CUE.compute_CUE(sol1, N1, u1, R0_1, λ, m1)
     C_final1 = sol1.y[:N1, -1]
     comm1_data = []
     for i in range(N1):
@@ -85,7 +95,7 @@ def simulate(args):
         })
 
     # --- Community 2 (invader) results ---
-    _, species_CUE2 = CUE.compute_CUE(sol2, N2, u2, R0_2, l2, m2)
+    _, species_CUE2 = CUE.compute_CUE(sol2, N2, u2, R0_2, λ, m2)
     C_final2 = sol2.y[:N2, -1]
     comm2_data = []
     for i in range(N2):
@@ -105,8 +115,8 @@ def simulate(args):
     ce2 = sol2.y[:N2, -1]
     C0_3 = np.concatenate([ce1, ce2 * dilution_rate])
     R0_3 = np.full(M1, 1) 
-    sol3 = param.solve_micrm(N3, M3, u3, l3, m3, lambda_alpha3, rho3, omega3, C0_3, R0_3)
-    _, species_CUE3 = CUE.compute_CUE(sol3, N3, u3, R0_3, l3, m3)
+    sol3 = param.solve_micrm(N3, M3, u3, l3, m3, lambda_alpha3, rho3, omega3, C0_3, R0_3, t_span)
+    _, species_CUE3 = CUE.compute_CUE(sol3, N3, u3, R0_3, λ, m3)
     C_final3 = sol3.y[:N3, -1]
     comm3_data = []
     for i in range(N3):
@@ -141,5 +151,5 @@ if __name__ == "__main__":
 
     all_data = [row for result in all_data_nested if result for row in result]
     df = pd.DataFrame(all_data)
-    df.to_csv("../data/rare.csv", index=False)
+    df.to_csv("data/rare.csv", index=False)
 
