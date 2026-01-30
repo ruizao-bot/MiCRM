@@ -35,45 +35,33 @@ def modular_uptake(N, M, N_modules, s_ratio):
     return u
 
 
-def modular_leakage(M, N_modules, s_ratio, λ, u):
+def modular_leakage(M, N_modules, s_ratio, λ):
     assert N_modules <= M, "N_modules must be less than or equal to M"
 
-    # 划分模块
+    # Baseline
     sR = M // N_modules
     dR = M - (N_modules * sR)
+
+    # Get module sizes and add to make to M
     diffR = np.full(N_modules, sR, dtype=int)
-    if dR > 0:
-        diffR[np.random.choice(N_modules, dR, replace=False)] += 1
+    diffR[np.random.choice(N_modules, dR, replace=False)] += 1
     mR = [list(range(x - 1, y)) for x, y in zip((np.cumsum(diffR) - diffR + 1), np.cumsum(diffR))]
 
-    # 基于u的模块权重
-    uptake = np.asarray(u, dtype=float)
-    resource_demand = np.sum(uptake, axis=0)
-    module_demand = np.array([np.sum(resource_demand[idx]) for idx in mR], dtype=float)
-    mean_demand = np.mean(module_demand)
-
-    module_norm = module_demand / mean_demand
-    module_weights = module_norm ** s_ratio
-
-    # 赋给每个资源
-    resource_weights = np.ones(M, dtype=float)
-    for idx, module in enumerate(mR):
-        resource_weights[module] = module_weights[idx]
-
-    # 生成泄漏矩阵并加权
     l = np.random.rand(M, M)
-    l *= resource_weights[np.newaxis, :]
 
-    # 行归一化到 λ
-    row_sums = np.sum(l, axis=1)
-    row_sums[row_sums == 0.0] = 1.0
-    l = λ * l / row_sums[:, None]
+    for i, x in enumerate(mR):
+        for j, y in enumerate(mR):
+            if i == j or i + 1 == j:
+                l[np.ix_(x, y)] *= s_ratio
+
+    for i in range(M):
+        l[i, :] = λ * l[i, :] / np.sum(l[i, :])
 
     return l
 
 
 def generate_l_tensor(N, M, N_modules, s_ratio, λ, u):
-    l_template = modular_leakage(M, N_modules, s_ratio, λ, u)
+    l_template = modular_leakage(M, N_modules, s_ratio, λ)
     l_tensor = np.repeat(l_template[np.newaxis, :, :], N, axis=0)
     return l_tensor
 
@@ -264,11 +252,16 @@ def calculate_community_feedback(L_eff, u):
     N, M = L_eff.shape
     total_similarity = 0.0
     
+    # 创建去掉对角线的 L_eff（用于计算 C_feed）
+    L_eff_no_diag = L_eff.copy()
+    for i in range(min(N, M)):
+        L_eff_no_diag[i, i] = 0
+    
     for i in range(N):
         for j in range(N):
             if i != j:
-                dot_product = np.dot(L_eff[i], u[j])
-                norm_L_eff = np.linalg.norm(L_eff[i])
+                dot_product = np.dot(L_eff_no_diag[i], u[j])
+                norm_L_eff = np.linalg.norm(L_eff_no_diag[i])
                 norm_u_j = np.linalg.norm(u[j])
                 
                 if norm_L_eff > 0 and norm_u_j > 0:
@@ -286,9 +279,15 @@ def calculate_community_feedback(L_eff, u):
 def community_level_competition(u):
     """
     Compute average shared uptake demand (u @ u^T) excluding self-terms.
+    Each species' uptake vector has diagonal removed (u[i,i] = 0).
     """
-    overlap = u @ u.T
-    N = overlap.shape[0]
+    N, M = u.shape
+    # 去掉对角线元素
+    u_no_diag = u.copy()
+    for i in range(min(N, M)):
+        u_no_diag[i, i] = 0
+    
+    overlap = u_no_diag @ u_no_diag.T
     if N < 2:
         return np.nan
     total = np.sum(overlap) - np.trace(overlap)

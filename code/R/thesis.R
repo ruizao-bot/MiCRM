@@ -1,3 +1,13 @@
+# ============================================================================
+# THESIS ANALYSIS - MAIN FIGURES
+# ============================================================================
+# This script generates key figures for thesis:
+# 1. final_plot: Species CUE vs Abundance
+# 2. p_comp_cue: Competition vs Community CUE
+# 3. p_fac_cue: Facilitation vs Community CUE
+# 4. p_cue_sim_domin: CUE vs Bray-Curtis Similarity (with dominance)
+# ============================================================================
+
 setwd("/Users/jiayi/Desktop/micrm/master_project")
 library(ggplot2)
 library(readr)
@@ -7,217 +17,103 @@ library(scales)
 library(stringr)
 library(patchwork)
 library(vegan)
-library(fitdistrplus)
-library(minpack.lm)
-library(purrr)
-library(jsonlite)
+# library(fitdistrplus)
+# library(minpack.lm)
+# library(purrr)
+# library(jsonlite)
 
-# Palette
+# Palette and theme setup
 pal_rgb <- c("1" = "#E74C3C", "2" = "#2ECC71", "3" = "#3498DB")
-base_theme <- theme_minimal(base_size = 14) +
+base_theme <- theme_minimal(base_size = 12) +
   theme(
     text       = element_text(family = "Times New Roman"),
-    axis.text  = element_text(family = "Times New Roman", size = 14),
-    axis.title = element_text(family = "Times New Roman", size = 14),
+    axis.text  = element_text(family = "Times New Roman", size = 12),
+    axis.title = element_text(family = "Times New Roman", size = 12),
     panel.grid.major = element_blank(),
     panel.grid.minor = element_blank(),
-    panel.border     = element_rect(color = "black", fill = NA, size = 1),
+    panel.border     = element_rect(color = "black", fill = NA, size = 0.3),
     axis.ticks       = element_line(color = "black", size = 0.3),
     axis.ticks.length = unit(0.15, "cm")
   )
 
-# Data
+# Load data
 df <- read.csv("data/coal.csv")
 df_select <- df %>% mutate(Status = ifelse(Abundance < 1e-5, "Extinction", "Survival"))
 df_surv <- df_select %>% filter(Abundance > 1e-5)
 
-# 1. Abundance Histogram
-p_hist <- ggplot(df, aes(x = Abundance, fill = factor(Community), color = factor(Community))) +
-  geom_histogram(position = "identity", bins = 50, alpha = 0.3) +
-  geom_vline(xintercept = 1e-5, linetype = "dashed", linewidth = 0.7, colour = "black") +
-  scale_x_log10() +
-  facet_wrap(~ Community, ncol = 1, scales = "free_y") +
-  base_theme+
-  labs(x = "Abundance", y = "Frequency", fill = "Community", color = "Community") +
-  scale_fill_manual(values = pal_rgb) +
-  scale_color_manual(values = pal_rgb)
-print(p_hist)
+# ============================================================================
+# COMMENTED OUT: Abundance Histogram
+# ============================================================================
+# # 1. Abundance Histogram
+# p_hist <- ggplot(df, aes(x = Abundance, fill = factor(Community), color = factor(Community))) +
+#   geom_histogram(position = "identity", bins = 50, alpha = 0.3) +
+#   geom_vline(xintercept = 1e-5, linetype = "dashed", linewidth = 0.7, colour = "black") +
+#   scale_x_log10() +
+#   facet_wrap(~ Community, ncol = 1, scales = "free_y") +
+#   base_theme+
+#   labs(x = "Abundance", y = "Frequency", fill = "Community", color = "Community") +
+#   scale_fill_manual(values = pal_rgb) +
+#   scale_color_manual(values = pal_rgb)
+# print(p_hist)
+# 
+# ggsave("results/presentation/abund_hist.png", plot = p_hist,
+#        width = 21, height = 18, units = "cm", dpi = 600, bg = "white")
+# 
+# ggsave("results/abundance_histogram.pdf",
+#        plot = p_hist,
+#        device = cairo_pdf,
+#        width = 21,
+#        height = 18,
+#        units = "cm",
+#        dpi = 600,
+#        bg = "white")
 
-ggsave("results/presentation/abund_hist.png", plot = p_hist,
-       width = 21, height = 18, units = "cm", dpi = 600, bg = "white")
+# ============================================================================
+# FIGURE 1: Species CUE vs Abundance (final_plot)
+# ============================================================================
+# Create log-transformed abundance for linear modeling
+df_surv <- df_surv %>% mutate(log10_Abundance = log10(Abundance))
 
-ggsave("results/abundance_histogram.pdf",
-       plot = p_hist,
-       device = cairo_pdf,
-       width = 21,
-       height = 18,
-       units = "cm",
-       dpi = 600,
-       bg = "white")
-
-# 2. Survival Boxplot
-df_ext <- df %>% 
-  mutate(
-    StatusGroup = ifelse(Abundance < 1e-5,
-                         "Extinction",
-                         paste0("Survival_", Community))
-  ) %>% 
-  dplyr::select(Community, Species_CUE, StatusGroup) %>% 
-  mutate(
-    Community   = factor(Community, levels = c(1, 2, 3)),
-    StatusGroup = factor(StatusGroup,
-                         levels = c("Extinction",
-                                    "Survival_1",
-                                    "Survival_2",
-                                    "Survival_3"))
-  )
-p_box <- ggplot(df_ext, aes(x = factor(Community), y = Species_CUE, fill = StatusGroup)) +
-  geom_boxplot(outlier.shape = NA, alpha = 0.3, position = position_dodge(width = 0.8)) +
-  base_theme +
-  geom_jitter(aes(color = StatusGroup), 
-              position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.8), 
-              size = 0.1, alpha = 0.3) +
-  scale_fill_manual(values = c(
-    Extinction  = "grey60",
-    Survival_1  = "#E74C3C",
-    Survival_2  = "#2ECC71",
-    Survival_3  = "#3498DB"
-  )) +
-  scale_color_manual(values = c(
-    Extinction  = "grey60",
-    Survival_1  = "#E74C3C",
-    Survival_2  = "#2ECC71",
-    Survival_3  = "#3498DB"
-  )) +
-  # 添加星号标注：x = 3 表示 Community 3，y 值根据你的数据稍作调整
-  annotate("text", x = 3, y = 0.29, label = "*", size = 6) +
-  labs(x = "Community", y = "CUE", fill = "Status", color = "Status") +
-  theme_minimal()+
-  base_theme
-print(p_box)
-ggsave("results/presentation/survival_boxplot.png", plot = p_box,
-       width = 21, height = 10, units = "cm", dpi = 600, bg = "white")
-
-ggsave("results/survival_boxplot.pdf", plot = p_box, device = cairo_pdf, width = 21, height = 10, units = "cm", dpi = 600, bg = "white")
-
-# 3. Logistic Fit (CUE vs Abundance)
-fit_lines <- data.frame()
+# Fit linear models and output diagnostics
 fit_diagnostics <- data.frame()
-
-cat("\n=== Logistic Fit Diagnostics ===\n")
-
+cat("\n=== Linear Fit: log10(Abundance) ~ Species_CUE ===\n")
 for (comm in c("1", "2", "3")) {
-  dat <- df_surv[df_surv$Community == comm, ]
-  if (nrow(dat) > 0) {
-    # Better initial parameter estimation
-    K_init <- quantile(dat$Abundance, 0.95)  # Use 95th percentile instead of max
-    x0_init <- median(dat$Species_CUE)
-    # Estimate r from the data spread
-    r_init <- 10 / (max(dat$Species_CUE) - min(dat$Species_CUE))
-    
-    model_fit <- tryCatch({
-      nlsLM(
-        Abundance ~ K / (1 + exp(-r * (Species_CUE - x0))),
-        data = dat,
-        start = list(K = K_init, r = r_init, x0 = x0_init),
-        control = nls.lm.control(maxiter = 500)
-      )
-    }, error = function(e) {
-      # If nlsLM fails, try with different initial values or use linear model
-      cat("Warning: nlsLM failed for community", comm, "- using alternative approach\n")
-      return(NULL)
-    })
-    
-    if (!is.null(model_fit)) {
-      # Generate predictions
-      cue_seq <- seq(min(dat$Species_CUE), max(dat$Species_CUE), length.out = 200)
-      pred <- data.frame(
-        Species_CUE = cue_seq,
-        Abundance = predict(model_fit, newdata = data.frame(Species_CUE = cue_seq)),
-        Community = comm
-      )
-      fit_lines <- bind_rows(fit_lines, pred)
-      
-      # Calculate goodness-of-fit metrics
-      residuals <- residuals(model_fit)
-      observed <- dat$Abundance
-      
-      # R-squared (pseudo R² for nonlinear models)
-      SS_res <- sum(residuals^2)
-      SS_tot <- sum((observed - mean(observed))^2)
-      R2 <- 1 - (SS_res / SS_tot)
-      
-      # AIC and BIC
-      n <- length(observed)
-      k <- length(coef(model_fit))  # number of parameters
-      log_likelihood <- -n/2 * (log(2*pi) + log(SS_res/n) + 1)
-      AIC_val <- -2 * log_likelihood + 2 * k
-      BIC_val <- -2 * log_likelihood + k * log(n)
-      
-      # Store diagnostics
-      fit_diagnostics <- rbind(fit_diagnostics, data.frame(
-        Community = comm,
-        R2 = R2,
-        AIC = AIC_val,
-        BIC = BIC_val,
-        N = n
-      ))
-      
-      # Print summary
-      cat("\n--- Community", comm, "---\n")
-      cat("Model parameters:\n")
-      print(coef(model_fit))
-      cat("\nGoodness of fit:\n")
-      cat("  R² =", round(R2, 4), "\n")
-      cat("  AIC =", round(AIC_val, 2), "\n")
-      cat("  BIC =", round(BIC_val, 2), "\n")
-      cat("  N =", n, "\n")
-    }
-  }
+  dat <- df_surv %>% filter(Community == comm)
+  model_fit <- lm(log10_Abundance ~ Species_CUE, data = dat)
+  fit_diagnostics <- rbind(fit_diagnostics, data.frame(
+    Community = comm,
+    R2 = summary(model_fit)$r.squared,
+    Slope = coef(model_fit)[2],
+    Intercept = coef(model_fit)[1],
+    P_value = summary(model_fit)$coefficients[2, 4],
+    N = nrow(dat)
+  ))
 }
-
-cat("\n=== Fit Quality Comparison ===\n")
 print(fit_diagnostics)
-p_logistic <- ggplot(df_surv, aes(x = Species_CUE, y = Abundance, colour = factor(Community))) +
-  geom_point(alpha = 0.3, size = 2) +
-  geom_line(data = fit_lines, aes(x = Species_CUE, y = Abundance, colour = factor(Community)), size = 1.2, alpha = 0.7) +
-  facet_wrap(~ Community, nrow = 1) +
-  base_theme+
-  labs(x = "Species-level CUE", y = "Abundance", color = "Community") +
-  scale_color_manual(values = pal_rgb)+
-  scale_x_continuous(breaks = seq(0.2, 0.4, length.out = 6))
-print(p_logistic)
-ggsave("results/logistic_fit.pdf", plot = p_logistic, device = cairo_pdf, width = 21, height = 15, units = "cm", dpi = 600, bg = "white")
 
+# Set uniform y-axis range across communities
+y_min <- min(df_surv$log10_Abundance, na.rm = TRUE)
+y_max <- max(df_surv$log10_Abundance, na.rm = TRUE)
 
-
-# 4. CUE-abundance Plot
-# 设置统一 y 轴范围（log10）
-y_min <- min(df_surv$Abundance[df_surv$Abundance > 0], na.rm = TRUE)
-y_max <- max(df_surv$Abundance, na.rm = TRUE)
-
-# 保存拼图结果
+# Generate plots for each community
 plots <- list()
 
 for (comm in c("1", "2", "3")) {
-  df_i <- df_surv %>% filter(Community == comm)  # Include only survival species
-  fit_i <- fit_lines %>% filter(Community == comm)
+  df_i <- df_surv %>% filter(Community == comm)
 
-  # 主图：CUE vs Abundance（log10 Y 轴）
-  p_main <- ggplot(df_i, aes(x = Species_CUE, y = Abundance)) +
-    geom_point(color = pal_rgb[comm], alpha = 0.3)  +
-    scale_y_log10(limits = c(y_min, y_max)) +
-    labs(x = "Species-level CUE", y = "Abundance") +
+  # Main plot: CUE vs log10(Abundance)
+  p_main <- ggplot(df_i, aes(x = Species_CUE, y = log10_Abundance)) +
+    geom_point(color = pal_rgb[comm], alpha = 0.3) +
+    # geom_smooth(method = "lm", se = TRUE, color = pal_rgb[comm], linewidth = 1) +
+    ylim(y_min, y_max) +
+    labs(x = "Species-level CUE", y = expression(log[10](Abundance))) +
     base_theme
 
-  p_hist <- ggplot(df_i, aes(x = Abundance)) +
-    geom_histogram(bins = 50,
-                   fill = pal_rgb[comm],
-                   alpha = 0.3,
-                   color = pal_rgb[comm]) +
-    geom_vline(xintercept = 1e-5, linetype = "dashed") +
-    scale_x_log10(limits = c(y_min, y_max)) +
-    coord_flip() +  # 横过来：Abundance 成为 y 轴
+  # Side histogram
+  p_hist <- ggplot(df_i, aes(x = log10_Abundance)) +
+    geom_histogram(bins = 50, fill = pal_rgb[comm], alpha = 0.3, color = pal_rgb[comm]) +
+    xlim(y_min, y_max) +
+    coord_flip() +
     scale_y_reverse() +
     labs(x = "Frequency", y = NULL) +
     base_theme +
@@ -231,109 +127,160 @@ for (comm in c("1", "2", "3")) {
   p_combo <- p_hist + p_main + plot_layout(widths = c(1.2, 3))
   plots[[comm]] <- p_combo
 }
-# 纵向排列 3 个社区图
+
+# Combine plots vertically for 3 communities
 final_plot <- wrap_plots(plots, ncol = 1) & base_theme
 final_plot
-# 导出高清图像（A4 宽，论文可用）
-ggsave("results/presentation/cue_abund.png", plot = final_plot, width = 21, height = 24, units = "cm", dpi = 600, bg = "white")
+
+# Export high-resolution images
+ggsave("results/cue_abund.png", plot = final_plot, width = 16, height = 20, units = "cm", dpi = 600, bg = "white")
 ggsave("results/cue_abund.pdf",
        plot = final_plot,
        device = cairo_pdf,
-       width = 21,      # A4 宽
-       height = 24,     # 每个子图约 8cm
-       units = "cm",
-       dpi = 600,
-       bg = "white")
-############5. niche overlap vs CUE ############
-p_cosine_cue <- ggplot(df, aes(x = Competition, y = Community_CUE, color = factor(Community),shape = factor(Community))) +
-  geom_point(size = 2, alpha = 0.7) +
-  geom_smooth(method = "lm", se = TRUE, aes(group = factor(Community), color = factor(Community))) +
-  scale_color_manual(values = pal_rgb, name = "Community") +
-  
-  labs(
-    x = "Uptake Cosine Similarity",
-    y = "Community CUE",
-    color = "Community"
-  ) +
-  base_theme+
-  scale_shape_manual(values = c("1" = 16, "2" = 17, "3" = 15), name = "Community") 
-
-print(p_cosine_cue)
-
-ggsave("results/Competition_vs_communityCUE.png",
-       plot = p_cosine_cue,
-       width = 21,
-       height = 12,
+       width = 16,
+       height = 20,
        units = "cm",
        dpi = 600,
        bg = "white")
 
-
-
-# Linear regression for each community
-lm_results <- df %>%
-  group_by(Community) %>%
-  group_map(~ broom::tidy(lm(Community_CUE ~ Competition, data = .x)), .keep = TRUE) %>%
-  bind_rows(.id = "Community")
-
-print(lm_results)
-
-df_survival <- df %>%
-  group_by(Seed, Community) %>%
+# ============================================================================
+# FIGURE 2: Competition vs Community CUE - Separate by Community
+# ============================================================================
+# Prepare aggregated data with community-level metrics
+df_comm_agg <- df %>%
+  group_by(Seed, Community, Competition, Community_CUE, Facilitation) %>%
   summarise(
-    Survival_Rate = mean(Abundance > 1e-5),
-    Community_CUE = unique(Community_CUE),
-    Niche_Overlap = unique(Competition),
+    Species_CUE_Var = var(Species_CUE, na.rm = TRUE),
     .groups = "drop"
   )
-models <- df_survival %>%
-  group_by(Community) %>%
-  do(model = lm(Survival_Rate ~ Niche_Overlap, data = .))
 
-# view results
-lapply(models$model, summary)
+cat("\n=== Competition vs CUE Analysis ===\n")
 
-p_cue_niche_surv <- ggplot(df_survival, aes(
-  x = Niche_Overlap, y = Community_CUE,
-  color = Survival_Rate
-)) +
-  geom_point(size = 1.7, alpha = 0.9) +
-  geom_smooth(method = "lm", se = TRUE, color = "black", size = 0.6) +
-  scale_color_viridis_c(option = "plasma", name = "Survival Rate", limits = c(0.03, 0.15)) +
-  facet_wrap(~ Community, labeller = as_labeller(c(
-    "1" = "Community 1", "2" = "Community 2", "3" = "Community 3"
-  )), scales = "fixed") +
-  labs(
-    x = "Niche Overlap (Survivors)",
-    y = "Community CUE"
-  ) +
-  base_theme +
-  theme(panel.spacing = unit(1.2, "lines"))
+# Solid color points with fit lines
+comp_plots <- list()
+for (comm in c(1, 2, 3)) {
+  df_comm <- df_comm_agg %>% filter(Community == comm)
+  model <- lm(Community_CUE ~ Competition, data = df_comm)
+  
+  r2 <- round(summary(model)$r.squared, 3)
+  pval <- summary(model)$coefficients[2, 4]
+  cat("\n--- Community", comm, "---\n")
+  cat("R-squared:", r2, "\n")
+  cat("P-value:", format.pval(pval, digits = 4), "\n")
+  
+  p <- ggplot(df_comm, aes(x = Competition, y = Community_CUE)) +
+    geom_point(size = 1.8, alpha = 0.6, color = pal_rgb[as.character(comm)]) +
+    geom_smooth(method = "lm", se = FALSE, color = "black", linetype = "dashed", linewidth = 0.8) +
+    scale_x_continuous(
+      breaks = function(x) {
+        rng <- range(x)
+        mid <- (rng[1] + rng[2]) / 2
+        c(rng[1], mid, rng[2])
+      },
+      labels = function(x) sprintf("%.2f", x * 1e3)
+    ) +
+    labs(
+      x = expression(Competition~("*"~10^{-3})),
+      y = "Community CUE"
+    ) +
+    base_theme
+  
+  comp_plots[[comm]] <- p
+}
 
-print(p_cue_niche_surv)
+# Combine into single row
+ggsave("results/Competition_vs_communityCUE.png")
+ggsave("results/Competition_vs_communityCUE.pdf")
+p_comp_cue_combined <- wrap_plots(comp_plots, ncol = 3) & theme(plot.margin = margin(5, 5, 5, 5))
+print(p_comp_cue_combined)
+ggsave("results/Competition_vs_communityCUE.png",
+  plot = p_comp_cue_combined,
+  width = 18,
+  height = 8,
+  units = "cm",
+  dpi = 600,
+  bg = "white")
+ggsave("results/Competition_vs_communityCUE.pdf",
+  plot = p_comp_cue_combined,
+  device = cairo_pdf,
+  width = 18,
+  height = 8,
+  units = "cm",
+  dpi = 600,
+  bg = "white")
 
-ggsave("results/communityCUE_vs_nicheOverlap_survival.png",
-       plot = p_cue_niche_surv,
-       width = 21,
-       height = 10,
-       units = "cm",
-       dpi = 600,
-       bg = "white")
+# ============================================================================
+# FIGURE 3: Facilitation vs Community CUE - Separate by Community
+# ============================================================================
+cat("\n=== Facilitation vs CUE Analysis ===\n")
 
-############ 6. community dominance and similarity ############
-# 4. Similarity Plot
+# Solid color points with fit lines
+fac_plots <- list()
+for (comm in c(1, 2, 3)) {
+  df_comm <- df_comm_agg %>% filter(Community == comm)
+  model <- lm(Community_CUE ~ Facilitation, data = df_comm)
+  
+  r2 <- round(summary(model)$r.squared, 3)
+  pval <- summary(model)$coefficients[2, 4]
+  cat("\n--- Community", comm, "---\n")
+  cat("R-squared:", r2, "\n")
+  cat("P-value:", format.pval(pval, digits = 4), "\n")
+  
+  p <- ggplot(df_comm, aes(x = Facilitation, y = Community_CUE)) +
+    geom_point(size = 1.8, alpha = 0.6, color = pal_rgb[as.character(comm)]) +
+    geom_smooth(method = "lm", se = FALSE, color = "black", linetype = "dashed", linewidth = 0.8) +
+    scale_x_continuous(
+      breaks = function(x) c(min(x), max(x)),
+      labels = function(x) sprintf("%.2f", x)
+    ) +
+    labs(
+      x = "Facilitation",
+      y = "Community CUE"
+    ) +
+    base_theme
+  
+  fac_plots[[comm]] <- p
+}
+
+# Combine into single row
+ggsave("results/Facilitation_vs_communityCUE.png")
+ggsave("results/Facilitation_vs_communityCUE.pdf")
+p_fac_cue_combined <- wrap_plots(fac_plots, ncol = 3) & theme(plot.margin = margin(5, 5, 5, 5))
+print(p_fac_cue_combined)
+ggsave("results/Facilitation_vs_communityCUE.png",
+  plot = p_fac_cue_combined,
+  width = 18,
+  height = 8,
+  units = "cm",
+  dpi = 600,
+  bg = "white")
+ggsave("results/Facilitation_vs_communityCUE.pdf",
+  plot = p_fac_cue_combined,
+  device = cairo_pdf,
+  width = 18,
+  height = 8,
+  units = "cm",
+  dpi = 600,
+  bg = "white")
+
+# ============================================================================
+# FIGURE 4: CUE vs Bray-Curtis Similarity with Dominance (p_cue_sim_domin)
+# ============================================================================
+# Prepare data: Assign global species IDs to avoid overlap between communities
 df_mut <- df_surv %>%
   mutate(Global_Species_ID = case_when(
     Community == 2 ~ Species_ID + 100,
     TRUE ~ Species_ID
   ))
 
+# Calculate Bray-Curtis dissimilarity between communities
 bray_results <- data.frame()
 
 for (s in unique(df_mut$Seed)) {
   df_seed <- df_mut %>% filter(Seed == s) %>% as.data.frame()
   if (!all(c(1, 2, 3) %in% unique(df_seed$Community))) next
   
+  # Create community matrix for Bray-Curtis calculation
   comm_mat <- df_seed %>%
     dplyr::select(Community, Global_Species_ID, Abundance) %>%
     pivot_wider(
@@ -345,6 +292,7 @@ for (s in unique(df_mut$Seed)) {
   comm_mat$Community <- NULL
   if (nrow(comm_mat) != 3) next
   
+  # Calculate Bray-Curtis dissimilarity
   bc <- vegdist(comm_mat, method = "bray")
   bc_mat <- as.matrix(bc)
   if (!all(c("3", "1", "2") %in% rownames(bc_mat))) next
@@ -363,32 +311,15 @@ for (s in unique(df_mut$Seed)) {
     Sim_3vs1 = 1 - d31,
     Sim_3vs2 = 1 - d32
   ))
-  
 }
 
-# 拟合线性模型
-mod_1 <- lm(Sim_3vs1 ~ CUE_1, data = bray_results)
-mod_2 <- lm(Sim_3vs2 ~ CUE_2, data = bray_results)
+# Statistical analysis: Fit linear models
+# mod_1 <- lm(Sim_3vs1 ~ CUE_1, data = bray_results)
+# mod_2 <- lm(Sim_3vs2 ~ CUE_2, data = bray_results)
+# summary(mod_1)
+# summary(mod_2)
 
-# 输出摘要
-summary(mod_1)
-summary(mod_2)
-
-# (Assume bray_results is already calculated as in your code)
-p_sim <- ggplot() +
-  geom_point(data = bray_results, aes(x = CUE_1, y = Sim_3vs1, color = "1"), alpha = 0.4, size = 2) +
-  geom_smooth(data = bray_results, aes(x = CUE_1, y = Sim_3vs1, color = "1"), method = "lm", se = TRUE, alpha = 0.7) +
-  geom_point(data = bray_results, aes(x = CUE_2, y = Sim_3vs2, color = "2"), alpha = 0.4, size = 2) +
-  geom_smooth(data = bray_results, aes(x = CUE_2, y = Sim_3vs2, color = "2"), method = "lm", se = TRUE, alpha = 0.7) +
-  scale_color_manual(values = pal_rgb, name = "Community") +
-  labs(x = "Community CUE", y = "Bray–Curtis similarity to Community 3", color = "Community") +
-  base_theme +
-  theme(legend.position = "right")
-
-print(p_sim)
-
-ggsave("results/presentation/similarity.png", plot = p_sim, width = 21, height = 12, units = "cm", dpi = 600, bg = "white")
-ggsave("results/similarity.pdf", plot = p_sim, device = cairo_pdf, width = 21, height = 12, units = "cm", dpi = 600, bg = "white")
+# Prepare data for plotting with dominance information
 df_comm <- df_select %>%
   filter(Community %in% c(1, 2)) %>%
   group_by(Seed, Community) %>%
@@ -401,43 +332,7 @@ df_comm <- df_select %>%
     Dominance = ifelse(paste0("Community ", Community) == Dominant_Community, 1, 0)
   )
 
-model_all <- glm(Dominance ~ Community_CUE, data = df_comm, family = binomial)
-
-# 构造预测输入
-cue_seq <- seq(min(df_comm$Community_CUE),
-               max(df_comm$Community_CUE),
-               length.out = 200)
-
-# 生成预测数据框
-df_pred_all <- data.frame(
-  Community_CUE = cue_seq,
-  Dominance = predict(model_all,
-                      newdata = data.frame(Community_CUE = cue_seq),
-                      type = "response")
-)
-
-p_domin <- ggplot(df_comm, aes(x = Community_CUE, y = Dominance, color = factor(Community))) +
-  geom_jitter(width = 0.0005, height = 0.05, alpha = 0.6, size = 2) +
-  geom_line(data = df_pred_all,
-            aes(x = Community_CUE, y = Dominance),
-            color = "grey", linewidth = 0.9, inherit.aes = FALSE) +
-  scale_color_manual(values = pal_rgb) +
-  labs(
-    x = "Community-level CUE",
-    y = "Probability of Dominance (1 = Dominant)",
-    color = "Community"
-  ) +
-  base_theme
-p_domin
-ggsave("results/Dominance.pdf",
-       plot = p_domin,
-       device = cairo_pdf,
-       width = 21,    # A4 宽
-       height = 12,   # 自定义高度
-       units = "cm",
-       dpi = 600,
-       bg = "white")
-
+# Join with similarity data
 df_comm_sim <- df_comm %>%
   left_join(
     bray_results %>% dplyr::select(Seed, Sim_3vs1, Sim_3vs2),
@@ -448,13 +343,14 @@ df_comm_sim <- df_comm %>%
     Community = factor(Community)
   )
 
+# Define color scheme for dominance groups
 dominance_colors <- c(
   "0" = "grey60",
   "1_1" = as.vector(pal_rgb["1"]),
   "1_2" = as.vector(pal_rgb["2"])
 )
 
-
+# Create dominance group variable
 df_comm_sim <- df_comm_sim %>%
   mutate(
     DominanceGroup = case_when(
@@ -464,8 +360,9 @@ df_comm_sim <- df_comm_sim %>%
     )
   )
 
+# Generate plot
 p_cue_sim_domin <- ggplot(df_comm_sim, aes(x = Community_CUE, y = Similarity, color = factor(DominanceGroup), shape = factor(Community))) +
-  geom_point(size = 3, alpha = 0.8) +
+  geom_point(size = 2.5, alpha = 0.8) +
   scale_color_manual(
     values = dominance_colors,
     labels = c("0" = "Not Dominant", "1_1" = "Dominant", "1_2" = "Dominant"),
@@ -482,131 +379,109 @@ p_cue_sim_domin <- ggplot(df_comm_sim, aes(x = Community_CUE, y = Similarity, co
   ) +
   base_theme+
   theme(
-    legend.title = element_text(size = 14, family = "Times New Roman"),
-    legend.text  = element_text(size = 14, family = "Times New Roman")
+    legend.title = element_text(size = 12, family = "Times New Roman"),
+    legend.text  = element_text(size = 11, family = "Times New Roman")
   )
 
 print(p_cue_sim_domin)
+
 ggsave("results/dom_sim.pdf",
        plot = p_cue_sim_domin,
        device = cairo_pdf,
-       width = 21,    # A4 宽
-       height = 12,   # 自定义高度
+       width = 16,
+       height = 10,
        units = "cm",
        dpi = 600,
        bg = "white")
 
-ggsave("results/presentation/dom_sim.png",
+ggsave("results/dom_sim.png",
        plot = p_cue_sim_domin,
-       width = 21,    # A4 宽
-       height = 12,   # 自定义高度
+       width = 16,
+       height = 10,
        units = "cm",
        dpi = 600,
        bg = "white")
 
-#########################8. richness ################
-df_stats <- df_surv%>%
-  group_by(Seed, Community, Community_CUE) %>%
-  summarise(
-    Richness = n_distinct(Species_ID),
-    CUE.Var = var(Species_CUE, na.rm = TRUE),
-    .groups = "drop"
-  )
+# ============================================================================
+# COMMENTED OUT: Additional analyses and plots
+# ============================================================================
 
-comm_colors <- c("1" = "red", "2" = "chartreuse3", "3" = "blue")
+# # Bray-Curtis similarity plot (without dominance coloring)
+# p_sim <- ggplot() +
+#   geom_point(data = bray_results, aes(x = CUE_1, y = Sim_3vs1, color = "1"), alpha = 0.4, size = 2) +
+#   geom_smooth(data = bray_results, aes(x = CUE_1, y = Sim_3vs1, color = "1"), method = "lm", se = TRUE, alpha = 0.7) +
+#   geom_point(data = bray_results, aes(x = CUE_2, y = Sim_3vs2, color = "2"), alpha = 0.4, size = 2) +
+#   geom_smooth(data = bray_results, aes(x = CUE_2, y = Sim_3vs2, color = "2"), method = "lm", se = TRUE, alpha = 0.7) +
+#   scale_color_manual(values = pal_rgb, name = "Community") +
+#   labs(x = "Community CUE", y = "Bray–Curtis similarity to Community 3", color = "Community") +
+#   base_theme +
+#   theme(legend.position = "right")
 
+# # Dominance probability plot
+# model_all <- glm(Dominance ~ Community_CUE, data = df_comm, family = binomial)
+# cue_seq <- seq(min(df_comm$Community_CUE), max(df_comm$Community_CUE), length.out = 200)
+# df_pred_all <- data.frame(
+#   Community_CUE = cue_seq,
+#   Dominance = predict(model_all, newdata = data.frame(Community_CUE = cue_seq), type = "response")
+# )
+# 
+# p_domin <- ggplot(df_comm, aes(x = Community_CUE, y = Dominance, color = factor(Community))) +
+#   geom_jitter(width = 0.0005, height = 0.05, alpha = 0.6, size = 2) +
+#   geom_line(data = df_pred_all, aes(x = Community_CUE, y = Dominance), color = "grey", linewidth = 0.9, inherit.aes = FALSE) +
+#   scale_color_manual(values = pal_rgb) +
+#   labs(x = "Community-level CUE", y = "Probability of Dominance (1 = Dominant)", color = "Community") +
+#   base_theme
 
-p_rich <- ggplot(df_stats, aes(x = CUE.Var, y = Richness, color = factor(Community), shape = factor(Community))) +
-  geom_point(size = 2, alpha = 0.8) +
-  geom_smooth(method = "lm", se = TRUE, linetype = "solid", size = 1) +
-  scale_color_manual(values = pal_rgb, name = "Community") +
-  facet_wrap(~ Community, scales = "free_x") +
-  labs(
-    x = expression("Species CUE Variance"),
-    y = "Species Richness"
-  ) +
-  scale_x_log10(
-    breaks = function(lims) 10^seq(log10(lims[1]), log10(lims[2]), length.out = 3),
-    labels = scales::label_scientific(digits = 1),
-    expand = expansion(mult = c(0.05, 0.05)),
-    minor_breaks = NULL
-  )+
-  base_theme +
-  scale_shape_manual(values = c("1" = 16, "2" = 17, "3" = 15), name = "Community") +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 1),
-    panel.spacing = unit(1.2, "lines")
-  )
+# # Richness analysis
+# df_stats <- df_surv %>%
+#   group_by(Seed, Community, Community_CUE) %>%
+#   summarise(
+#     Richness = n_distinct(Species_ID),
+#     CUE.Var = var(Species_CUE, na.rm = TRUE),
+#     .groups = "drop"
+#   )
+# 
+# p_rich <- ggplot(df_stats, aes(x = CUE.Var, y = Richness, color = factor(Community), shape = factor(Community))) +
+#   geom_point(size = 2, alpha = 0.8) +
+#   geom_smooth(method = "lm", se = TRUE, linetype = "solid", size = 1) +
+#   scale_color_manual(values = pal_rgb, name = "Community") +
+#   facet_wrap(~ Community, scales = "free_x") +
+#   labs(x = expression("Species CUE Variance"), y = "Species Richness") +
+#   scale_x_log10(
+#     breaks = function(lims) 10^seq(log10(lims[1]), log10(lims[2]), length.out = 3),
+#     labels = scales::label_scientific(digits = 1),
+#     expand = expansion(mult = c(0.05, 0.05)),
+#     minor_breaks = NULL
+#   ) +
+#   base_theme +
+#   scale_shape_manual(values = c("1" = 16, "2" = 17, "3" = 15), name = "Community") +
+#   theme(
+#     axis.text.x = element_text(angle = 45, hjust = 1),
+#     panel.spacing = unit(1.2, "lines")
+#   )
 
+# # Uptake variance vs Species CUE
+# p_uv <- ggplot(df_surv, aes(x = Species_CUE, y = UptakeVar, color = factor(Community))) +
+#   geom_point(alpha = 0.5, size = 1.2) +
+#   geom_smooth(method = "lm", se = TRUE, linetype = "solid", size = 1) +
+#   scale_color_manual(values = pal_rgb, name = "Community") +
+#   scale_x_log10(
+#     breaks = function(lims) 10^seq(log10(lims[1]), log10(lims[2]), length.out = 3),
+#     labels = scales::label_scientific(digits = 1),
+#     expand = expansion(mult = c(0.05, 0.05)),
+#     minor_breaks = NULL
+#   ) +
+#   labs(x = "Uptake Variance", y = "Species-level CUE", color = "Community") +
+#   facet_wrap(~Community) +
+#   base_theme +
+#   scale_shape_manual(values = c("1" = 16, "2" = 17, "3" = 15), name = "Community") +
+#   theme(
+#     axis.text.x = element_text(angle = 45, hjust = 1),
+#     panel.spacing = unit(1.2, "lines")
+#   )
 
-print(p_rich)
+# # Depletion analysis
 
-for (comm in c(1, 2,3)) {
-  model_var <- lm(Richness ~ CUE.Var, data = subset(df_stats, Community == comm))
-  cat("\n---", comm, "---\n")
-  print(summary(model_var))
-}
-ggsave("results/richness.pdf",
-       plot = p_rich,
-       device = cairo_pdf,
-       width = 21,    # A4 宽
-       height = 12,   # 自定义高度
-       units = "cm",
-       dpi = 600,
-       bg = "white")
-
-
-ggsave("results/presentation/richness.png",
-       plot = p_rich,
-       width = 21,    # A4 宽
-       height = 12,   # 自定义高度
-       units = "cm",
-       dpi = 600,
-       bg = "white")
-
-# Plot: Uptake variance vs Species CUE
-p_uv <- ggplot(df_surv, aes(x = Species_CUE, y = UptakeVar, color = factor(Community))) +
-  geom_point(alpha = 0.5, size = 1.2) +
-  geom_smooth(method = "lm", se = TRUE, linetype = "solid", size = 1) +
-  scale_color_manual(values = pal_rgb, name = "Community") +
-  scale_x_log10(
-    breaks = function(lims) 10^seq(log10(lims[1]), log10(lims[2]), length.out = 3),
-    labels = scales::label_scientific(digits = 1),
-    expand = expansion(mult = c(0.05, 0.05)),
-    minor_breaks = NULL
-  ) +
-  labs(
-    x = "Uptake Variance",
-    y = "Species-level CUE",
-    color = "Community"
-  ) +
-  facet_wrap(~Community) +
-  base_theme +
-  scale_shape_manual(values = c("1" = 16, "2" = 17, "3" = 15), name = "Community") +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 1),
-    panel.spacing = unit(1.2, "lines")
-  )
-ggsave("results/uptake variance.pdf",
-       plot = p_uv,
-       device = cairo_pdf,
-       width = 21,    # A4 宽
-       height = 12,   # 自定义高度
-       units = "cm",
-       dpi = 600,
-       bg = "white")
-
-ggsave("results/presentation/uptake variance.png",
-       plot = p_uv,
-       width = 21,    # A4 宽
-       height = 12,   # 自定义高度
-       units = "cm",
-       dpi = 600,
-       bg = "white")
-
-################### 9. Depletion Analysis ##################
-
-# Prepare depletion data
 df_depletion <- df %>%
   group_by(Seed, Community) %>%
   summarise(
@@ -616,34 +491,89 @@ df_depletion <- df %>%
     .groups = "drop"
   )
 
-# 9.1 Depletion vs Community CUE
 p_depletion_cue <- ggplot(df_depletion, aes(x = Community_CUE, y = Depletion, color = factor(Community), shape = factor(Community))) +
   geom_point(size = 2, alpha = 0.7) +
   geom_smooth(method = "lm", se = TRUE, linetype = "solid", size = 1) +
   scale_color_manual(values = pal_rgb, name = "Community") +
   scale_shape_manual(values = c("1" = 16, "2" = 17, "3" = 15), name = "Community") +
-  labs(
-    x = "Community CUE",
-    y = "Resource Depletion (Residual Sum)",
-    color = "Community"
-  ) +
+  labs(x = "Community CUE", y = "Resource Depletion (Residual Sum)", color = "Community") +
   base_theme
-
-print(p_depletion_cue)
-
 ggsave("results/depletion_vs_CUE.pdf",
        plot = p_depletion_cue,
        device = cairo_pdf,
-       width = 21,
-       height = 12,
+       width = 16,
+       height = 10,
+       units = "cm",
+       dpi = 600,
+       bg = "white")
+# ============================================================================
+# FIGURE 5: Rare Species Invasion - CUE vs Survival Probability (p_s)
+# ============================================================================
+# Load rare species invasion data
+df_rare <- read.csv("data/rare.csv")
+
+# Create survival labels
+df_rare <- df_rare %>%
+  mutate(survival     = ifelse(C_final > 1e-5, "Survived", "Extinct"),
+         survived_bin = ifelse(survival == "Survived", 1, 0))
+
+df_rare_surv <- df_rare %>% filter(survival == "Survived")
+
+# Check available dilution rates
+cat("\n=== Rare Species Analysis ===\n")
+cat("Available dilution rates:", unique(df_rare$DilutionRate), "\n")
+
+# Plot: CUE vs survival probability
+p_s <- ggplot(df_rare, aes(x = CUE, y = survived_bin, colour = factor(DilutionRate))) +
+  geom_jitter(height = 0.05, width = 0, alpha = 0.4, size = 1.2, shape = 16) +
+  stat_smooth(method = "glm",
+              method.args = list(family = "binomial"),
+              se = FALSE, size = 1.2, linetype = "dashed") +
+  labs(
+    x = "Species-level CUE",
+    y = "Probability of Survival",
+    colour = "Dilution Rate"
+  ) +
+  scale_color_manual(
+    values = c("0.01" = "#E74C3C", "0.05" = "#2ECC71", "0.1" = "#3498DB"),
+    labels = c("0.01", "0.05", "0.1")
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    text = element_text(family = "Times New Roman"),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 11),
+    panel.grid.major = element_line(color = "grey80", size = 0.5),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(color = "black", fill = NA, size = 1),
+    axis.ticks = element_line(color = "black", size = 0.5),
+    axis.ticks.length = unit(0.15, "cm")
+  )
+
+print(p_s)
+
+# Statistical analysis: logistic regression
+cat("\n=== Logistic Regression: Survival ~ CUE * DilutionRate ===\n")
+library(broom)
+glm(survived_bin ~ CUE * DilutionRate, data = df_rare, family = "binomial") %>%
+  tidy() %>%
+  print()
+
+ggsave("results/rare_survival.pdf",
+       plot = p_s,
+       device = cairo_pdf,
+       width = 16,
+       height = 8,
        units = "cm",
        dpi = 600,
        bg = "white")
 
-ggsave("results/presentation/depletion_vs_CUE.png",
-       plot = p_depletion_cue,
-       width = 21,
-       height = 12,
+ggsave("results/survival_by_dilution.png",
+       plot = p_s,
+       width = 16,
+       height = 8,
        units = "cm",
        dpi = 600,
        bg = "white")

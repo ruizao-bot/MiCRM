@@ -18,18 +18,12 @@ N_pool = 1000  # Species pool size
 M_pool = 200   # Resource pool size
 
 # Coalescence parameterization tied to b (per coalescence.py)
-λ_max = 0.3
-λ_min = 0.0
+λ_max = 0.2
+λ_min = 0.01
 s_ratio_max = 10
 
 N1 = 100
 M1 = 50
-N2 = 100
-M2 = 50
-# maintenance cost baseline and per-species epsilon pool
-chi0 = 0.2
-epsilon_pool = np.random.uniform(0, 0.1, N_pool)
-
 N2 = 100
 M2 = 50
 
@@ -40,7 +34,7 @@ SURV_THRESH = 1e-5
 results_list = []
 
 # Loop b from 0 to 1 (inclusive)
-for b in np.linspace(0.1, 1.0, 51):
+for b in np.linspace(0.1, 0.9, 51):
 
     # derive λ, s_ratio, N_modules from b (as in coalescence.py)
     λ = λ_min + (λ_max - λ_min) * (1 - b)
@@ -89,16 +83,13 @@ for b in np.linspace(0.1, 1.0, 51):
     R0_1 = np.full(M1, 1)
     R0_2 = np.full(M2, 1)
     # Compute maintenance costs for community 1
-    eps1 = epsilon_pool[species_indices1]
-    m1 = param.compute_maintenance(chi0, eps1, λ, u1)
-
+    m1 = 0.2
     sol1 = param.solve_micrm(N1, M1, u1, l1, m1, lambda_alpha1, rho1, omega1, C0_1, R0_1, t_span)
     ce1 = sol1.y[:N1, -1]  # Consumer abundance at equilibrium
     
     # Simulate Community 2
     # Compute maintenance costs for community 2
-    eps2 = epsilon_pool[species_indices2]
-    m2 = param.compute_maintenance(chi0, eps2, λ, u2)
+    m2 = 0.2
 
     sol2 = param.solve_micrm(N2, M2, u2, l2, m2, lambda_alpha2, rho2, omega2, C0_2, R0_2, t_span)
     ce2 = sol2.y[:N2, -1]
@@ -109,8 +100,7 @@ for b in np.linspace(0.1, 1.0, 51):
     u3 = u_pool[np.ix_(species_indices3, resource_indices3)]
     
     # Compute maintenance costs for merged community
-    eps3 = epsilon_pool[species_indices3]
-    m3 = param.compute_maintenance(chi0, eps3, λ, u3)
+    m3 = 0.2
     lambda_alpha3 = np.full(len(resource_indices3), λ)
     omega3 = omega_pool[resource_indices3]
     N3 = N1 + N2
@@ -153,9 +143,12 @@ for b in np.linspace(0.1, 1.0, 51):
         'Richness1': n_surv1,
         'Richness2': n_surv2,
         'Richness3': n_surv3,
-        'C_feed1': C_feed1,
-        'C_feed2': C_feed2,
-        'C_feed3': C_feed3,
+        'L_eff1_sum': np.sum(L_eff1),
+        'L_eff2_sum': np.sum(L_eff2),
+        'L_eff3_sum': np.sum(L_eff3),
+        # 'C_feed1': C_feed1,
+        # 'C_feed2': C_feed2,
+        # 'C_feed3': C_feed3,
         'CUE1': community_CUE1,
         'CUE2': community_CUE2,
         'CUE3': community_CUE3,
@@ -168,79 +161,10 @@ for b in np.linspace(0.1, 1.0, 51):
 # --- Plotting ---
 df = pd.DataFrame(results_list)
 
-# Create subplots for multiple analyses
-fig, axes = plt.subplots(2, 3, figsize=(20, 12))
-
-# Plot 1: Richness vs b
-axes[0, 0].plot(df['b'], df['Richness1'], marker='o', linestyle='-', label='Community 1', color='red')
-axes[0, 0].plot(df['b'], df['Richness2'], marker='s', linestyle='-', label='Community 2', color='green')
-axes[0, 0].plot(df['b'], df['Richness3'], marker='^', linestyle='-', label='Community 3 (Coalesced)', color='blue')
-axes[0, 0].set_title('Community Richness vs. Degree of looseness')
-axes[0, 0].set_xlabel('Degree of looseness')
-axes[0, 0].set_ylabel('Richness')
-axes[0, 0].legend()
-axes[0, 0].grid(True)
-
-# Plot 2: CUE vs b
-axes[0, 1].plot(df['b'], df['CUE1'], marker='o', linestyle='-', label='Community 1', color='red')
-axes[0, 1].plot(df['b'], df['CUE2'], marker='s', linestyle='-', label='Community 2', color='green')
-axes[0, 1].plot(df['b'], df['CUE3'], marker='^', linestyle='-', label='Community 3 (Coalesced)', color='blue')
-axes[0, 1].set_title('Community CUE vs. Degree of looseness')
-axes[0, 1].set_xlabel('Degree of looseness')
-axes[0, 1].set_ylabel('CUE')
-axes[0, 1].legend()
-axes[0, 1].grid(True)
-
-# Plot 3: Competition vs b
-axes[0, 2].plot(df['b'], df['Competition1'], marker='o', linestyle='-', label='Community 1', color='red')
-axes[0, 2].plot(df['b'], df['Competition2'], marker='s', linestyle='-', label='Community 2', color='green')
-axes[0, 2].plot(df['b'], df['Competition3'], marker='^', linestyle='-', label='Community 3 (Coalesced)', color='blue')
-axes[0, 2].set_title('Community Competition vs. Degree of looseness')
-axes[0, 2].set_xlabel('Degree of looseness')
-axes[0, 2].set_ylabel('Competition')
-axes[0, 2].legend()
-axes[0, 2].grid(True)
-
-# Plot 4: C_feed vs b
-axes[1, 0].plot(df['b'], df['C_feed1'], marker='o', linestyle='-', label='Community 1', color='red')
-axes[1, 0].plot(df['b'], df['C_feed2'], marker='s', linestyle='-', label='Community 2', color='green')
-axes[1, 0].plot(df['b'], df['C_feed3'], marker='^', linestyle='-', label='Community 3 (Coalesced)', color='blue')
-axes[1, 0].set_title('Facilitation vs. Degree of looseness')
-axes[1, 0].set_xlabel('Degree of looseness')
-axes[1, 0].set_ylabel('Facilitation')
-axes[1, 0].legend()
-axes[1, 0].grid(True)
-
-# Plot 5: CUE vs C_feed correlation
-axes[1, 1].scatter(df['C_feed1'], df['CUE1'], alpha=0.6, label='Community 1', color='red', s=50)
-axes[1, 1].scatter(df['C_feed2'], df['CUE2'], alpha=0.6, label='Community 2', color='green', s=50)
-axes[1, 1].scatter(df['C_feed3'], df['CUE3'], alpha=0.6, label='Community 3 (Coalesced)', color='blue', s=50)
-axes[1, 1].set_title('CUE vs Facilitation')
-axes[1, 1].set_xlabel('Facilitation')
-axes[1, 1].set_ylabel('CUE')
-axes[1, 1].legend()
-axes[1, 1].grid(True)
-
-# Plot 6: CUE vs Competition
-axes[1, 2].scatter(df['Competition1'], df['CUE1'], alpha=0.6, label='Community 1', color='red', s=50)
-axes[1, 2].scatter(df['Competition2'], df['CUE2'], alpha=0.6, label='Community 2', color='green', s=50)
-axes[1, 2].scatter(df['Competition3'], df['CUE3'], alpha=0.6, label='Community 3 (Coalesced)', color='blue', s=50)
-axes[1, 2].set_title('CUE vs Community Competition')
-axes[1, 2].set_xlabel('Competition')
-axes[1, 2].set_ylabel('CUE')
-axes[1, 2].legend()
-axes[1, 2].grid(True)
-
-plt.tight_layout()
-
 # Save the plots
 project_root = os.path.abspath(os.path.join(script_dir, os.pardir))
 results_dir = os.path.join(project_root, "results")
-os.makedirs(results_dir, exist_ok=True)
-plot_file = os.path.join(results_dir, 'b_analysis_fix_s_ratio.png')
-plt.savefig(plot_file, dpi=300, bbox_inches='tight')
 
-print(f"Analysis plots saved to {plot_file}")
 
 # Save data to CSV for further analysis
 data_file = os.path.join(results_dir, 'b_analysis.csv')
