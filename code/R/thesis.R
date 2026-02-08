@@ -190,7 +190,6 @@ for (comm in c(1, 2, 3)) {
 
 # Combine into single row
 ggsave("results/Competition_vs_communityCUE.png")
-ggsave("results/Competition_vs_communityCUE.pdf")
 p_comp_cue_combined <- wrap_plots(comp_plots, ncol = 3) & theme(plot.margin = margin(5, 5, 5, 5))
 print(p_comp_cue_combined)
 ggsave("results/Competition_vs_communityCUE.png",
@@ -214,50 +213,539 @@ ggsave("results/Competition_vs_communityCUE.pdf",
 # ============================================================================
 cat("\n=== Facilitation vs CUE Analysis ===\n")
 
-# Solid color points with fit lines
+
+# ---- Community-level aggregation ----
+df_comm_fac <- df_surv %>%
+  group_by(Seed, Community) %>%
+  summarise(
+    Community_CUE = unique(Community_CUE),
+    Facilitation = mean(Facilitation),
+    .groups = "drop"
+  )
+
+# Plot: Facilitation vs Community CUE (community-level)
 fac_plots <- list()
+## Statistical summary table
+fac_stats <- data.frame(Community=character(), Coefficient=numeric(), R2=numeric(), P_value=numeric(), N=integer())
 for (comm in c(1, 2, 3)) {
-  df_comm <- df_comm_agg %>% filter(Community == comm)
+  df_comm <- df_comm_fac %>% filter(Community == comm)
   model <- lm(Community_CUE ~ Facilitation, data = df_comm)
-  
-  r2 <- round(summary(model)$r.squared, 3)
+  coef_val <- coef(model)[2]
+  r2 <- summary(model)$r.squared
   pval <- summary(model)$coefficients[2, 4]
-  cat("\n--- Community", comm, "---\n")
-  cat("R-squared:", r2, "\n")
+  n <- nrow(df_comm)
+  fac_stats <- rbind(fac_stats, data.frame(Community=comm, Coefficient=coef_val, R2=r2, P_value=pval, N=n))
+  cat("\n--- Community", comm, "(Facilitation vs Community CUE) ---\n")
+  cat("Coefficient:", round(coef_val, 4), "\n")
+  cat("R-squared:", round(r2, 4), "\n")
   cat("P-value:", format.pval(pval, digits = 4), "\n")
-  
   p <- ggplot(df_comm, aes(x = Facilitation, y = Community_CUE)) +
     geom_point(size = 1.8, alpha = 0.6, color = pal_rgb[as.character(comm)]) +
     geom_smooth(method = "lm", se = FALSE, color = "black", linetype = "dashed", linewidth = 0.8) +
     scale_x_continuous(
-      breaks = function(x) c(min(x), max(x)),
-      labels = function(x) sprintf("%.2f", x)
+      breaks = function(x) {
+        rng <- range(x)
+        c(rng[1], (rng[1] + rng[2]) / 2, rng[2])
+      },
+      labels = function(x) sprintf("%.2f", x * 1e3)
     ) +
     labs(
-      x = "Facilitation",
+      x = expression(Facilitation~("*"~10^{-3})),
       y = "Community CUE"
     ) +
     base_theme
-  
   fac_plots[[comm]] <- p
 }
-
-# Combine into single row
-ggsave("results/Facilitation_vs_communityCUE.png")
-ggsave("results/Facilitation_vs_communityCUE.pdf")
-p_fac_cue_combined <- wrap_plots(fac_plots, ncol = 3) & theme(plot.margin = margin(5, 5, 5, 5))
+cat("\nFacilitation vs Community CUE statistics summary:\n")
+print(fac_stats)
+## Horizontal layout: nrow = 1 (one row), ncol = NA lets patchwork auto-arrange
+p_fac_cue_combined <- wrap_plots(fac_plots, nrow = 1) & theme(plot.margin = margin(5, 5, 5, 5))
 print(p_fac_cue_combined)
 ggsave("results/Facilitation_vs_communityCUE.png",
   plot = p_fac_cue_combined,
-  width = 18,
-  height = 8,
+  width = 24,
+  height = 7,
   units = "cm",
   dpi = 600,
   bg = "white")
 ggsave("results/Facilitation_vs_communityCUE.pdf",
   plot = p_fac_cue_combined,
   device = cairo_pdf,
+  width = 24,
+  height = 7,
+  units = "cm",
+  dpi = 600,
+  bg = "white")
+
+# ============================================================================
+# FIGURE 3B: Species-level Competition Analysis
+# ============================================================================
+cat("\n=== Species-level Competition Analysis ===\n")
+
+# Plot 1: Species Competition vs Species CUE
+species_comp_cue_plots <- list()
+for (comm in c(1, 2, 3)) {
+  df_comm <- df_surv %>% filter(Community == comm)
+  model <- lm(Species_CUE ~ Species_Competition, data = df_comm)
+  
+  r2 <- round(summary(model)$r.squared, 3)
+  pval <- summary(model)$coefficients[2, 4]
+  cat("\n--- Community", comm, "CUE vs Species Competition ---\n")
+  cat("R-squared:", r2, "\n")
+  cat("P-value:", format.pval(pval, digits = 4), "\n")
+  
+  p <- ggplot(df_comm, aes(x = Species_Competition, y = Species_CUE)) +
+    geom_point(size = 1.5, alpha = 0.4, color = pal_rgb[as.character(comm)]) +
+    geom_smooth(method = "lm", se = FALSE, color = "black", linetype = "dashed", linewidth = 0.8) +
+    scale_x_continuous(
+      breaks = function(x) {
+        rng <- range(x)
+        c(rng[1], (rng[1] + rng[2]) / 2, rng[2])
+      },
+      labels = function(x) sprintf("%.2f", x * 1e3)
+    ) +
+    labs(
+      x = expression(Species~Competition~("*"~10^{-3})),
+      y = "Species-level CUE"
+    ) +
+    base_theme
+  
+  species_comp_cue_plots[[comm]] <- p
+}
+
+p_species_comp_cue <- wrap_plots(species_comp_cue_plots, ncol = 3) & theme(plot.margin = margin(5, 5, 5, 5))
+print(p_species_comp_cue)
+
+ggsave("results/Species_Competition_vs_CUE.png",
+  plot = p_species_comp_cue,
   width = 18,
+  height = 8,
+  units = "cm",
+  dpi = 600,
+  bg = "white")
+
+ggsave("results/Species_Competition_vs_CUE.pdf",
+  plot = p_species_comp_cue,
+  device = cairo_pdf,
+  width = 18,
+  height = 8,
+  units = "cm",
+  dpi = 600,
+  bg = "white")
+
+# Plot 2: Species Competition vs Abundance
+species_comp_abund_plots <- list()
+for (comm in c(1, 2, 3)) {
+  df_comm <- df_surv %>% filter(Community == comm) %>%
+    mutate(log10_Abundance = log10(Abundance))
+  
+  model <- lm(log10_Abundance ~ Species_Competition, data = df_comm)
+  
+  r2 <- round(summary(model)$r.squared, 3)
+  pval <- summary(model)$coefficients[2, 4]
+  cat("\n--- Community", comm, "Abundance vs Species Competition ---\n")
+  cat("R-squared:", r2, "\n")
+  cat("P-value:", format.pval(pval, digits = 4), "\n")
+  
+  p <- ggplot(df_comm, aes(x = Species_Competition, y = log10_Abundance)) +
+    geom_point(size = 1.5, alpha = 0.4, color = pal_rgb[as.character(comm)]) +
+    geom_smooth(method = "lm", se = FALSE, color = "black", linetype = "dashed", linewidth = 0.8) +
+    scale_x_continuous(
+      breaks = function(x) {
+        rng <- range(x)
+        c(rng[1], (rng[1] + rng[2]) / 2, rng[2])
+      },
+      labels = function(x) sprintf("%.2f", x * 1e3)
+    ) +
+    labs(
+      x = expression(Species~Competition~("*"~10^{-3})),
+      y = expression(log[10](Abundance))
+    ) +
+    base_theme
+  
+  species_comp_abund_plots[[comm]] <- p
+}
+
+p_species_comp_abund <- wrap_plots(species_comp_abund_plots, ncol = 3) & theme(plot.margin = margin(5, 5, 5, 5))
+print(p_species_comp_abund)
+
+ggsave("results/Species_Competition_vs_Abundance.png",
+  plot = p_species_comp_abund,
+  width = 18,
+  height = 8,
+  units = "cm",
+  dpi = 600,
+  bg = "white")
+
+ggsave("results/Species_Competition_vs_Abundance.pdf",
+  plot = p_species_comp_abund,
+  device = cairo_pdf,
+  width = 18,
+  height = 8,
+  units = "cm",
+  dpi = 600,
+  bg = "white")
+
+# ============================================================================
+# FIGURE 3C: CUE Distribution by Competition Level - Polarization Analysis
+# ============================================================================
+cat("\n=== CUE Distribution by Competition Level ===\n")
+
+# Create competition bins for each community
+df_surv_binned <- df %>%
+  group_by(Community) %>%
+  mutate(
+    Comp_Quantile = ntile(Species_Competition, 3),
+    Comp_Level = case_when(
+      Comp_Quantile == 1 ~ "Low",
+      Comp_Quantile == 2 ~ "Medium",
+      Comp_Quantile == 3 ~ "High"
+    ),
+    Comp_Level = factor(Comp_Level, levels = c("Low", "Medium", "High"))
+  ) %>%
+  ungroup()
+
+# Calculate variance and other statistics for each bin
+comp_stats <- df_surv_binned %>%
+  group_by(Community, Comp_Level) %>%
+  summarise(
+    Mean_CUE = mean(Species_CUE),
+    Var_CUE = var(Species_CUE),
+    SD_CUE = sd(Species_CUE),
+    CV_CUE = sd(Species_CUE) / mean(Species_CUE),
+    N = n(),
+    .groups = "drop"
+  )
+
+cat("\n--- CUE Statistics by Competition Level ---\n")
+print(comp_stats)
+
+# Plot 1: Density plots showing CUE distribution by competition level
+cue_dist_plots <- list()
+for (comm in c(1, 2, 3)) {
+  df_comm <- df_surv_binned %>% filter(Community == comm)
+  
+  p <- ggplot(df_comm, aes(x = Species_CUE, fill = Comp_Level, color = Comp_Level)) +
+    geom_density(alpha = 0.3, linewidth = 0.8) +
+    scale_fill_manual(
+      values = c("Low" = "#3498DB", "Medium" = "#F39C12", "High" = "#E74C3C"),
+      name = "Competition"
+    ) +
+    scale_color_manual(
+      values = c("Low" = "#3498DB", "Medium" = "#F39C12", "High" = "#E74C3C"),
+      name = "Competition"
+    ) +
+    labs(
+      x = "Species-level CUE",
+      y = "Density",
+      title = paste("Community", comm)
+    ) +
+    base_theme +
+    theme(
+      legend.position = "right",
+      plot.title = element_text(hjust = 0.5, size = 12)
+    )
+  
+  cue_dist_plots[[comm]] <- p
+}
+
+p_cue_dist <- wrap_plots(cue_dist_plots, ncol = 3, guides = "collect") & 
+  theme(plot.margin = margin(5, 5, 5, 5))
+print(p_cue_dist)
+
+ggsave("results/CUE_Distribution_by_Competition.png",
+  plot = p_cue_dist,
+  width = 24,
+  height = 8,
+  units = "cm",
+  dpi = 600,
+  bg = "white")
+
+ggsave("results/CUE_Distribution_by_Competition.pdf",
+  plot = p_cue_dist,
+  device = cairo_pdf,
+  width = 24,
+  height = 8,
+  units = "cm",
+  dpi = 600,
+  bg = "white")
+
+# Plot 2: Violin plots showing CUE distribution by competition level
+cue_violin_plots <- list()
+for (comm in c(1, 2, 3)) {
+  df_comm <- df_surv_binned %>% filter(Community == comm)
+  
+  p <- ggplot(df_comm, aes(x = Comp_Level, y = Species_CUE, fill = Comp_Level)) +
+    geom_violin(alpha = 0.6, trim = FALSE) +
+    geom_boxplot(width = 0.2, alpha = 0.8, outlier.alpha = 0.3, outlier.size = 0.8) +
+    scale_fill_manual(
+      values = c("Low" = "#3498DB", "Medium" = "#F39C12", "High" = "#E74C3C"),
+      name = "Competition"
+    ) +
+    labs(
+      x = "Competition Level",
+      y = "Species-level CUE",
+      title = paste("Community", comm)
+    ) +
+    base_theme +
+    theme(
+      legend.position = "none",
+      plot.title = element_text(hjust = 0.5, size = 12)
+    )
+  
+  cue_violin_plots[[comm]] <- p
+}
+
+p_cue_violin <- wrap_plots(cue_violin_plots, ncol = 3) & 
+  theme(plot.margin = margin(5, 5, 5, 5))
+print(p_cue_violin)
+
+ggsave("results/CUE_Violin_by_Competition.png",
+  plot = p_cue_violin,
+  width = 20,
+  height = 8,
+  units = "cm",
+  dpi = 600,
+  bg = "white")
+
+ggsave("results/CUE_Violin_by_Competition.pdf",
+  plot = p_cue_violin,
+  device = cairo_pdf,
+  width = 20,
+  height = 8,
+  units = "cm",
+  dpi = 600,
+  bg = "white")
+
+# Plot 3: Variance trend - shows increasing variance with competition
+p_var_trend <- ggplot(comp_stats, aes(x = Comp_Level, y = Var_CUE, 
+                                       color = factor(Community), 
+                                       group = Community)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 3) +
+  scale_color_manual(
+    values = pal_rgb,
+    name = "Community"
+  ) +
+  labs(
+    x = "Competition Level",
+    y = "CUE Variance",
+    title = "CUE Variance vs Competition Level"
+  ) +
+  base_theme +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 12),
+    legend.position = "right"
+  )
+
+print(p_var_trend)
+
+ggsave("results/CUE_Variance_Trend.png",
+  plot = p_var_trend,
+  width = 14,
+  height = 10,
+  units = "cm",
+  dpi = 600,
+  bg = "white")
+
+ggsave("results/CUE_Variance_Trend.pdf",
+  plot = p_var_trend,
+  device = cairo_pdf,
+  width = 14,
+  height = 10,
+  units = "cm",
+  dpi = 600,
+  bg = "white")
+
+# ============================================================================
+# FIGURE 3D: Community-level Competition Effect on Species CUE Distribution
+# ============================================================================
+cat("\n=== Community Competition Effect on Species CUE ===\n")
+
+# Create community competition bins
+df_surv_comm_comp <- df %>%
+  group_by(Community) %>%
+  mutate(
+    Comm_Comp_Quantile = ntile(Competition, 3),
+    Comm_Comp_Level = case_when(
+      Comm_Comp_Quantile == 1 ~ "Low",
+      Comm_Comp_Quantile == 2 ~ "Medium",
+      Comm_Comp_Quantile == 3 ~ "High"
+    ),
+    Comm_Comp_Level = factor(Comm_Comp_Level, levels = c("Low", "Medium", "High"))
+  ) %>%
+  ungroup()
+
+# Calculate statistics by community competition level
+comm_comp_stats <- df_surv_comm_comp %>%
+  group_by(Community, Comm_Comp_Level) %>%
+  summarise(
+    Mean_CUE = mean(Species_CUE),
+    Var_CUE = var(Species_CUE),
+    SD_CUE = sd(Species_CUE),
+    CV_CUE = sd(Species_CUE) / mean(Species_CUE),
+    Mean_Competition = mean(Competition),
+    N = n(),
+    .groups = "drop"
+  )
+
+cat("\n--- CUE Statistics by Community Competition Level ---\n")
+print(comm_comp_stats)
+
+# Plot 1: Density plots by community competition level
+comm_comp_density_plots <- list()
+for (comm in c(1, 2, 3)) {
+  df_comm <- df_surv_comm_comp %>% filter(Community == comm)
+  
+  p <- ggplot(df_comm, aes(x = Species_CUE, fill = Comm_Comp_Level, color = Comm_Comp_Level)) +
+    geom_density(alpha = 0.3, linewidth = 0.8) +
+    scale_fill_manual(
+      values = c("Low" = "#3498DB", "Medium" = "#F39C12", "High" = "#E74C3C"),
+      name = "Community\nCompetition"
+    ) +
+    scale_color_manual(
+      values = c("Low" = "#3498DB", "Medium" = "#F39C12", "High" = "#E74C3C"),
+      name = "Community\nCompetition"
+    ) +
+    labs(
+      x = "Species-level CUE",
+      y = "Density",
+      title = paste("Community", comm)
+    ) +
+    base_theme +
+    theme(
+      legend.position = "right",
+      plot.title = element_text(hjust = 0.5, size = 12)
+    )
+  
+  comm_comp_density_plots[[comm]] <- p
+}
+
+p_comm_comp_density <- wrap_plots(comm_comp_density_plots, ncol = 3, guides = "collect") & 
+  theme(plot.margin = margin(5, 5, 5, 5))
+print(p_comm_comp_density)
+
+ggsave("results/CUE_Distribution_by_Community_Competition.png",
+  plot = p_comm_comp_density,
+  width = 24,
+  height = 8,
+  units = "cm",
+  dpi = 600,
+  bg = "white")
+
+ggsave("results/CUE_Distribution_by_Community_Competition.pdf",
+  plot = p_comm_comp_density,
+  device = cairo_pdf,
+  width = 24,
+  height = 8,
+  units = "cm",
+  dpi = 600,
+  bg = "white")
+
+# Plot 2: Variance trend by community competition - with all scatter points
+# Prepare individual point data
+df_comm_comp_points <- df_surv_comm_comp %>%
+  group_by(Seed, Community, Competition) %>%
+  summarise(
+    SD_CUE = sd(Species_CUE),
+    .groups = "drop"
+  )
+
+# Add values for group means
+comm_comp_stats <- comm_comp_stats %>%
+  mutate(
+    SD_CUE = sqrt(Var_CUE)
+  )
+
+p_comm_comp_var <- ggplot() +
+  geom_point(data = df_comm_comp_points, 
+             aes(x = Competition, y = SD_CUE, color = factor(Community)),
+             size = 1.5, alpha = 0.4, shape = 16) +
+  facet_wrap(~ Community, ncol = 3) +
+  scale_color_manual(
+    values = pal_rgb,
+    name = "Community"
+  ) +
+  scale_x_continuous(
+    breaks = function(x) {
+      rng <- range(x)
+      c(rng[1], (rng[1] + rng[2]) / 2, rng[2])
+    },
+    labels = function(x) sprintf("%.2f", x * 1e3)
+  ) +
+  labs(
+    x = expression(Community~Competition~("*"~10^{-3})),
+    y = "Species CUE Standard Deviation"
+  ) +
+  base_theme +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(size = 12, family = "Times New Roman")
+  )
+
+print(p_comm_comp_var)
+
+ggsave("results/CUE_Variance_by_Community_Competition.png",
+  plot = p_comm_comp_var,
+  width = 14,
+  height = 10,
+  units = "cm",
+  dpi = 600,
+  bg = "white")
+
+ggsave("results/CUE_Variance_by_Community_Competition.pdf",
+  plot = p_comm_comp_var,
+  device = cairo_pdf,
+  width = 14,
+  height = 10,
+  units = "cm",
+  dpi = 600,
+  bg = "white")
+
+# Plot 3: Scatter plot with continuous competition values
+comm_comp_scatter_plots <- list()
+for (comm in c(1, 2, 3)) {
+  df_comm <- df_surv_comm_comp %>% filter(Community == comm)
+  
+  p <- ggplot(df_comm, aes(x = Competition, y = Species_CUE)) +
+    geom_point(size = 1.5, alpha = 0.4, color = pal_rgb[as.character(comm)], shape = 16) +
+    geom_smooth(method = "lm", se = TRUE, color = "black", linetype = "dashed", linewidth = 0.8, alpha = 0.2) +
+    scale_x_continuous(
+      breaks = function(x) {
+        rng <- range(x)
+        c(rng[1], (rng[1] + rng[2]) / 2, rng[2])
+      },
+      labels = function(x) sprintf("%.2f", x * 1e3)
+    ) +
+    labs(
+      x = expression(Community~Competition~("*"~10^{-3})),
+      y = "Species-level CUE",
+      title = paste("Community", comm)
+    ) +
+    base_theme +
+    theme(
+      plot.title = element_text(hjust = 0.5, size = 12)
+    )
+  
+  comm_comp_scatter_plots[[comm]] <- p
+}
+
+p_comm_comp_box <- wrap_plots(comm_comp_scatter_plots, ncol = 3) & 
+  theme(plot.margin = margin(5, 5, 5, 5))
+print(p_comm_comp_box)
+
+ggsave("results/CUE_Scatter_by_Community_Competition.png",
+  plot = p_comm_comp_box,
+  width = 20,
+  height = 8,
+  units = "cm",
+  dpi = 600,
+  bg = "white")
+
+ggsave("results/CUE_Scatter_by_Community_Competition.pdf",
+  plot = p_comm_comp_box,
+  device = cairo_pdf,
+  width = 20,
   height = 8,
   units = "cm",
   dpi = 600,

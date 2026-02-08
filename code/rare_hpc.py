@@ -13,7 +13,7 @@ import CUE
 def simulate(args):
     seed, dilution_rate = args
     np.random.seed(seed)
-    N_pool, M_pool, λ, N_modules, s_ratio = 1000, 200, 0.2, 1, 1.0
+    N_pool, M_pool, λ, N_modules, s_ratio = 1000, 100, 0.2, 1, 1.0
     N1, M1, N2, M2 = 100, 50, 100, 50
     # maintenance cost baseline and per-species epsilon pool
     chi0 = 0.2
@@ -48,12 +48,10 @@ def simulate(args):
     C0_2 = np.full(N2, 0.01)  # 群落 2 的初始种群密度
     R0_1, R0_2 = np.full(M1, 1.0), np.full(M2, 1.0)
     # Solve for community 1 and 2
-    t_span = (0, 3000)
+    t_span = (0, 50000)
     # compute maintenance costs per community using param.compute_maintenance
-    eps1 = epsilon_pool[species_indices1]
-    m1 = param.compute_maintenance(chi0, eps1, λ, u1)
-    eps2 = epsilon_pool[species_indices2]
-    m2 = param.compute_maintenance(chi0, eps2, λ, u2)
+    m1 = 0.2
+    m2 = 0.2
 
     sol1 = param.solve_micrm(N1, M1, u1, l1, m1, lambda_alpha1, rho1, omega1, C0_1, R0_1, t_span)
     sol2 = param.solve_micrm(N2, M2, u2, l2, m2, lambda_alpha2, rho2, omega2, C0_2, R0_2, t_span)
@@ -64,9 +62,7 @@ def simulate(args):
     u3 = u_pool[np.ix_(species_indices3, resource_indices3)]
 
     l3 = l_pool[np.ix_(species_indices3, resource_indices3, resource_indices3)]
-    # maintenance for merged community
-    eps3 = epsilon_pool[species_indices3]
-    m3 = param.compute_maintenance(chi0, eps3, λ, u3)
+    m3 = 0.2
     lambda_alpha3 = np.full(len(resource_indices3), λ)
 
     omega3 = omega_pool[resource_indices3]

@@ -8,7 +8,7 @@ code_path = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(code_path, os.pardir))
 data_dir = os.path.join(project_root, "data")
 
-# 资源重叠实验主函数
+# Main function for resource overlap experiment
 def simulate_overlap(args):
     seed, overlap_ratio = args
     np.random.seed(seed)
@@ -20,11 +20,10 @@ def simulate_overlap(args):
     rho_pool, omega_pool = np.full(M_pool, 0.6), np.full(M_pool, 0.1)
     t_span = (0, 100000)
     
-    # 固定合并后的总资源数M3=50，根据overlap_ratio分配共享和独有资源
-    M3_fixed = 50  # 合并后固定总资源数
-    overlap_n = int(M3_fixed * overlap_ratio)  # 共享资源数
-    unique_n = int((M3_fixed - overlap_n) / 2)  # 每个群落的独有资源数
-    M1 = M2 = overlap_n + unique_n  # 每个群落的总资源数
+    # Fix the number of resources for each community M1=M2=50, allocate shared and unique resources based on overlap_ratio
+    M1 = M2 = 50
+    overlap_n = int(M1 * overlap_ratio)  # Number of shared resources
+    unique_n = M1 - overlap_n  # Number of unique resources per community
     
     all_resources = np.arange(M_pool)
     overlap_resources = np.random.choice(all_resources, overlap_n, replace=False)
@@ -56,46 +55,44 @@ def simulate_overlap(args):
     R0_2 = np.full(M2, 1.0)
     sol2 = param.solve_micrm(N2, M2, u2, l2, m2, lambda_alpha2, rho2, omega2, C0_2, R0_2, t_span)
 
-    # 合并群落
+    # Merge communities
     species_indices3 = np.concatenate([species_indices1, species_indices2])
     resource_indices3 = np.union1d(resource_indices1, resource_indices2)
+    N3, M3 = N1 + N2, len(resource_indices3)
+    
     u3 = u_pool[np.ix_(species_indices3, resource_indices3)]
+    
+    # Restrict species to only utilize resources from their original community
+    # Species from community 1 (first N1): can only utilize resources in resource_indices1
+    # Species from community 2 (last N2): can only utilize resources in resource_indices2
+    for i in range(N3):
+        for j, res in enumerate(resource_indices3):
+            if i < N1:  # Species from community 1
+                if res not in resource_indices1:
+                    u3[i, j] = 0.0
+            else:  # Species from community 2
+                if res not in resource_indices2:
+                    u3[i, j] = 0.0
+    
     l3 = l_pool[np.ix_(species_indices3, resource_indices3, resource_indices3)]
     lambda_alpha3 = np.full(len(resource_indices3), λ)
     omega3 = omega_pool[resource_indices3]
-    rho3 = rho_pool[resource_indices3]
-    N3, M3 = N1 + N2, len(resource_indices3)
     C0_3 = np.concatenate([sol1.y[:N1, -1], sol2.y[:N2, -1]])
-    R0_3 = np.full(M3, 1.0)
+    
+    # All resources use the same initial abundance and supply rate
+    R0_3 = np.full(M3, 1.0)  # R0 = 1
+    rho3 = rho_pool[resource_indices3]  # rho = 0.6 (inherited from resource pool)
+    
     m3 = 0.2
     sol3 = param.solve_micrm(N3, M3, u3, l3, m3, lambda_alpha3, rho3, omega3, C0_3, R0_3, t_span)
 
-    # 计算CUE和dominance/similarity
+    # Calculate CUE and dominance
     community_CUE1, species_CUE1 = param.compute_CUE(sol1, N1, u1, R0_1, lambda_alpha1, m1)
     community_CUE2, species_CUE2 = param.compute_CUE(sol2, N2, u2, R0_2, lambda_alpha2, m2)
     community_CUE3, species_CUE3 = param.compute_CUE(sol3, N3, u3, R0_3, lambda_alpha3, m3)
     C_final3 = sol3.y[:N3, -1]
     total_1, total_2 = np.sum(C_final3[:N1]), np.sum(C_final3[N1:])
-    dominant = 1 if total_1 > total_2 else 2
-    
-    # 仿照R代码计算similarity：构建群落-物种矩阵，使用Bray-Curtis距离
-    # 创建3x(N1+N2)的群落矩阵，每行是一个群落，每列是一个物种
-    C_final1 = sol1.y[:N1, -1]
-    C_final2 = sol2.y[:N2, -1]
-    
-    # 构建群落矩阵：群落1、群落2、合并群落3
-    comm_matrix = np.zeros((3, N1 + N2))
-    comm_matrix[0, :N1] = C_final1  # 群落1只有前N1个物种
-    comm_matrix[1, N1:] = C_final2  # 群落2只有后N2个物种
-    comm_matrix[2, :] = C_final3     # 合并群落有所有物种
-    
-    # 使用pdist计算Bray-Curtis距离矩阵
-    from scipy.spatial.distance import pdist, squareform
-    bray_dists = squareform(pdist(comm_matrix, metric='braycurtis'))
-    
-    # similarity = 1 - Bray-Curtis距离
-    similarity1 = 1 - bray_dists[2, 0]  # 合并群落(3) vs 群落1
-    similarity2 = 1 - bray_dists[2, 1]  # 合并群落(3) vs 群落2
+    dominant = "Community 1" if total_1 > total_2 else "Community 2"
 
     return {
         "Seed": seed,
@@ -103,9 +100,9 @@ def simulate_overlap(args):
         "CUE1": community_CUE1,
         "CUE2": community_CUE2,
         "CUE3": community_CUE3,
-        "Dominant": dominant,
-        "Similarity1": similarity1,
-        "Similarity2": similarity2
+        "Dominant_Community": dominant,
+        "Total_Abundance_1": total_1,
+        "Total_Abundance_2": total_2
     }
 
 if __name__ == "__main__":

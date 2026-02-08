@@ -249,46 +249,72 @@ def calculate_effective_leakage(u, l):
     return L_eff
 
 def calculate_community_feedback(L_eff, u):
-    N, M = L_eff.shape
-    total_similarity = 0.0
+    """
+    Calculate community-level facilitation as the mean over species of total leakage per species.
     
-    # 创建去掉对角线的 L_eff（用于计算 C_feed）
-    L_eff_no_diag = L_eff.copy()
-    for i in range(min(N, M)):
-        L_eff_no_diag[i, i] = 0
+    Parameters:
+    L_eff: effective leakage matrix (N x M)
+    u: uptake matrix (N x M) (not used)
     
-    for i in range(N):
-        for j in range(N):
-            if i != j:
-                dot_product = np.dot(L_eff_no_diag[i], u[j])
-                norm_L_eff = np.linalg.norm(L_eff_no_diag[i])
-                norm_u_j = np.linalg.norm(u[j])
-                
-                if norm_L_eff > 0 and norm_u_j > 0:
-                    cosine_sim = dot_product / (norm_L_eff * norm_u_j)
-                    total_similarity += cosine_sim
-    
-
-    if N > 1:
-        C_feed = (1 * total_similarity) / (N * (N - 1))
-    else:
-        C_feed = 0.0
-    
-    return C_feed
+    Returns:
+    F: community-level facilitation (scalar)
+    """
+    return np.mean(np.sum(L_eff, axis=1))
 
 def community_level_competition(u):
     """
-    Compute average shared uptake demand (u @ u^T) excluding self-terms.
-    Each species' uptake vector has diagonal removed (u[i,i] = 0).
+    Compute community-level average competition based on cosine similarity.
+    
+    Average cosine similarity across all pairs of species:
+        C_comp = 2/(N(N-1)) * Σ_{1≤i<j≤N} cos_sim(u_i, u_j)
+    where cos_sim(u_i, u_j) = (u_i · u_j) / (||u_i|| ||u_j||)
+    
+    Returns:
+        scalar: average cosine similarity across all species pairs
     """
     N, M = u.shape
-    # 去掉对角线元素
-    u_no_diag = u.copy()
-    for i in range(min(N, M)):
-        u_no_diag[i, i] = 0
-    
-    overlap = u_no_diag @ u_no_diag.T
     if N < 2:
         return np.nan
-    total = np.sum(overlap) - np.trace(overlap)
-    return total / (N * (N - 1))
+    
+    # Normalize each species vector
+    norms = np.linalg.norm(u, axis=1, keepdims=True)
+    u_normalized = u / (norms + 1e-10)
+    
+    # Compute cosine similarity matrix
+    similarity = u_normalized @ u_normalized.T
+    
+    # Sum over upper triangle (i < j) and multiply by 2
+    total = 0.0
+    for i in range(N):
+        for j in range(i + 1, N):
+            total += similarity[i, j]
+    
+    return 2 * total / (N * (N - 1))
+
+
+def species_level_competition(u):
+    """
+    Compute species-level competition based on cosine similarity of uptake vectors.
+
+    For each species i, compute average cosine similarity with all other species:
+        comp_i = (1/(N-1)) * Σ_{j≠i} cos_sim(u_i, u_j)
+    where cos_sim(u_i, u_j) = (u_i · u_j) / (||u_i|| ||u_j||)
+
+    Returns:
+        comp: (N,) array with species-level competition values.
+    """
+    N, M = u.shape
+    if N < 2:
+        return np.full(N, np.nan)
+
+    # Normalize each species vector
+    norms = np.linalg.norm(u, axis=1, keepdims=True)
+    u_normalized = u / (norms + 1e-10)  # Add small value to avoid division by zero
+    
+    # Compute cosine similarity matrix
+    similarity = u_normalized @ u_normalized.T
+    np.fill_diagonal(similarity, 0.0)
+    
+    # Average similarity with all other species
+    comp = np.sum(similarity, axis=1) / (N - 1)
+    return comp
