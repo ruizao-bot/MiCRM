@@ -1,3 +1,30 @@
+def competition2(C):
+    """
+    Compute species-level competition based on the dot product (CCT).
+    For each species i, compute the average dot product with all other species:
+        comp_i = (1/(N-1)) * sum_{j!=i} dot(C_i, C_j)
+    where dot(C_i, C_j) = sum_k C[i, k] * C[j, k]
+
+    Args:
+        C: (N, M) array, metabolic preference matrix for N species and M resources.
+
+    Returns:
+        comp: (N,) array, average competition pressure for each species.
+    """
+    N, M = C.shape
+    if N < 2:
+        # If only one species, cannot compute competition with others
+        return np.full(N, np.nan)
+
+    # 1. Compute competition matrix (dot products)
+    comp_matrix = C @ C.T
+
+    # 2. Exclude diagonal (self-competition)
+    np.fill_diagonal(comp_matrix, 0.0)
+
+    # 3. Average over other species
+    comp = np.sum(comp_matrix, axis=1) / (N - 1)
+    return comp
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.integrate import solve_ivp

@@ -94,6 +94,20 @@ def simulate_overlap(args):
     total_1, total_2 = np.sum(C_final3[:N1]), np.sum(C_final3[N1:])
     dominant = "Community 1" if total_1 > total_2 else "Community 2"
 
+    # Compute Bray-Curtis similarity between coalesced and each parent
+    # Parent 1 composition vector (N1 + N2): [sol1 final, zeros for parent 2 species]
+    C_final1 = sol1.y[:N1, -1]
+    C_final2 = sol2.y[:N2, -1]
+    parent1_vec = np.concatenate([C_final1, np.zeros(N2)])
+    parent2_vec = np.concatenate([np.zeros(N1), C_final2])
+    coalesced_vec = C_final3
+
+    # Bray-Curtis dissimilarity = sum(|x - y|) / sum(x + y)
+    bc_diss_3vs1 = np.sum(np.abs(coalesced_vec - parent1_vec)) / np.sum(coalesced_vec + parent1_vec) if np.sum(coalesced_vec + parent1_vec) > 0 else 1.0
+    bc_diss_3vs2 = np.sum(np.abs(coalesced_vec - parent2_vec)) / np.sum(coalesced_vec + parent2_vec) if np.sum(coalesced_vec + parent2_vec) > 0 else 1.0
+    sim_3vs1 = 1 - bc_diss_3vs1
+    sim_3vs2 = 1 - bc_diss_3vs2
+
     return {
         "Seed": seed,
         "Overlap": overlap_ratio,
@@ -102,7 +116,9 @@ def simulate_overlap(args):
         "CUE3": community_CUE3,
         "Dominant_Community": dominant,
         "Total_Abundance_1": total_1,
-        "Total_Abundance_2": total_2
+        "Total_Abundance_2": total_2,
+        "Sim_3vs1": sim_3vs1,
+        "Sim_3vs2": sim_3vs2
     }
 
 if __name__ == "__main__":

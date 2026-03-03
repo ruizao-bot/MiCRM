@@ -70,34 +70,41 @@ cue_slopes <- df_combined %>%
 print(cue_slopes)
 
 # ============================================================
-# Visualization: CUE vs Dominance scatter plot
+# Visualization: CUE Difference vs Similarity Difference — faceted by overlap
 # ============================================================
 
-# Add jitter to better display overlapping points
+# Compute CUE difference and similarity difference
+df_diff <- df %>%
+  mutate(
+    CUE_diff = CUE1 - CUE2,
+    Sim_diff = Sim_3vs1 - Sim_3vs2
+  )
 
+# Bin CUE difference into 7 equal-width intervals
+n_bins <- 7
+cue_range <- range(df_diff$CUE_diff)
+breaks <- seq(cue_range[1], cue_range[2], length.out = n_bins + 1)
+df_diff <- df_diff %>%
+  mutate(CUE_bin = cut(CUE_diff, breaks = breaks, include.lowest = TRUE, dig.lab = 2))
 
-# Make the plot longer (wider), move the legend inside, add y=0.5 dashed line, reduce jitter, and expand y-axis
-p_scatter <- ggplot(df_combined, aes(x = CUE, y = Dominance, color = Overlap)) +
-  geom_jitter(alpha = 0.5, width = 0, height = 0.025, size = 2) + # reduce jitter height
-  geom_smooth(method = "glm", method.args = list(family = "binomial"), 
-              se = TRUE, alpha = 0.2) +
-  geom_hline(yintercept = 0.5, linetype = "dashed", color = "black", size = 0.7) + # add dividing line
-  scale_y_continuous(
-    breaks = c(0, 0.5, 1),
-    labels = c("0", "0.5", "1"),
-    expand = expansion(mult = c(0.08, 0.08))
+# Overlap color palette
+overlap_colors <- c("0.25" = "#E74C3C", "0.5" = "#F39C12", "0.75" = "#3498DB")
+
+p_scatter <- ggplot(df_diff, aes(x = CUE_bin, y = Sim_diff, fill = Overlap)) +
+  geom_boxplot(position = position_dodge(0.8), width = 0.7,
+               alpha = 0.7, outlier.size = 1, outlier.alpha = 0.5) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black", linewidth = 0.5) +
+  scale_fill_manual(values = overlap_colors, name = "Resource\nOverlap") +
+  coord_cartesian(ylim = c(-1, 1)) +
+  labs(
+    x = expression(Delta*"CUE (Parent 1 "~-~" Parent 2)"),
+    y = expression(Delta*"Similarity (Parent 1 "~-~" Parent 2)")
   ) +
   base_theme +
-  labs(title = '',
-       x = 'Community CUE',
-       y = 'Dominance',
-       color = 'Resource Overlap') +
   theme(
-    legend.position = c(0.98, 0.08), # inside plot, bottom right
-    legend.justification = c(1, 0),
-    legend.direction = "vertical",
-    legend.background = element_blank(), # no border
-    legend.key = element_rect(fill = NA)
+    axis.text.x = element_text(angle = 30, hjust = 1, size = 9),
+    legend.title = element_text(size = 12, family = "Times New Roman"),
+    legend.text  = element_text(size = 11, family = "Times New Roman")
   )
 
 print(p_scatter)
@@ -106,7 +113,7 @@ print(p_scatter)
 ggsave("results/cue_dominance_overlap.pdf",
        plot = p_scatter,
        device = cairo_pdf,
-       width = 21,   # make the plot longer (wider)
+       width = 21,
        height = 12,
        units = "cm",
        dpi = 600,
