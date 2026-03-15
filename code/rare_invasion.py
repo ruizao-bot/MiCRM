@@ -1,21 +1,23 @@
 from multiprocessing import Pool, cpu_count
 import numpy as np
 import pandas as pd
-from scipy.integrate import solve_ivp
+import os
 import param
 
 # Random seed and simulation parameters
 BASE_SEED = 50
-N_SIMULATIONS = 50
+N_SIMULATIONS = 10
 
 # Exported file names
-COAL_FILE = "coal.csv"
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+RARE_FILE = os.path.join(DATA_DIR, "rare.csv")
+SUMMARY_FILE = os.path.join(DATA_DIR, "rare_summary.csv")
 
-# Species pooland resource pool parameters
+# Species pool and resource pool parameters
 N_POOL = 1000
 M_POOL = 100
 N_MODULES = 1
-S_RATIO = 1
+S_RATIO = 1.0
 LEAKAGE_RATE = 0.2
 
 # Community parameters
@@ -26,17 +28,25 @@ N2, M2 = 100, 50
 MAINTENANCE_COST = 0.2
 RHO_VALUE = 0.6
 OMEGA_VALUE = 0.1
-T_SPAN = (0, 100000)
+T_SPAN = (0, 50000)
+
 # Initial conditions
 C0_VALUE = 0.01
-R0_VALUE = 1
+R0_VALUE = 1.0
 
 # Survival threshold
 SURVIVAL_THRESHOLD = 1e-5
 
-def simulate(seed):
+# Dilution rates for invasion experiment
+DILUTION_RATES = [0.01,0.1]
+
+
+def simulate(args):
+    """Simulate rare species invasion with specified dilution rate."""
+    seed, dilution_rate = args
     rng = np.random.default_rng(seed)
 
+    # Generate species and resource pools
     u_pool = param.modular_uptake(N_POOL, M_POOL, N_MODULES, S_RATIO, rng)
     l_pool = param.generate_l_tensor(N_POOL, M_POOL, N_MODULES, S_RATIO, LEAKAGE_RATE, u_pool, rng)
 
@@ -51,6 +61,7 @@ def simulate(seed):
     omega1 = np.full(M1, OMEGA_VALUE)
     C0_1 = np.full(N1, C0_VALUE)
     R0_1 = np.full(M1, R0_VALUE)
+    sol1 = param.solve_micrm(N1, M1, u1, l1, MAINTENANCE_COST, lambda_alpha1, rho1, omega1, C0_1, R0_1, T_SPAN)
 
     resource_indices2 = param.choose_resources_for_second_community(M_POOL, M1, M2, resource_indices1, rng)
     remaining_species = np.setdiff1d(np.arange(N_POOL), species_indices1)
@@ -65,10 +76,7 @@ def simulate(seed):
     C0_2 = np.full(N2, C0_VALUE)
     R0_2 = np.full(M2, R0_VALUE)
 
-    sol1 = param.solve_micrm(N1, M1, u1, l1, MAINTENANCE_COST, lambda_alpha1, rho1, omega1, C0_1, R0_1, T_SPAN)
     sol2 = param.solve_micrm(N2, M2, u2, l2, MAINTENANCE_COST, lambda_alpha2, rho2, omega2, C0_2, R0_2, T_SPAN)
-    C_final1 = sol1.y[:N1, -1]
-    C_final2 = sol2.y[:N2, -1]
 
     species_indices3 = np.concatenate([species_indices1, species_indices2])
     resource_indices3 = resource_indices1 if M1 >= M2 else resource_indices2
@@ -81,36 +89,32 @@ def simulate(seed):
     lambda_alpha3 = np.full(M3, LEAKAGE_RATE)
     rho3 = np.full(M3, RHO_VALUE)
     omega3 = np.full(M3, OMEGA_VALUE)
-    C0_3 = np.concatenate([sol1.y[:N1, -1], sol2.y[:N2, -1]])
+    
+    # Apply dilution to invader community
+    C0_3 = np.concatenate([sol1.y[:N1, -1], sol2.y[:N2, -1] * dilution_rate])
     R0_3 = np.full(M3, R0_VALUE)
 
     sol3 = param.solve_micrm(N3, M3, u3, l3, MAINTENANCE_COST, lambda_alpha3, rho3, omega3, C0_3, R0_3, T_SPAN)
-    C_final3 = sol3.y[:N3, -1]
-
-    species_CUE1 = param.compute_species_CUE(u1, R0_1, lambda_alpha1, MAINTENANCE_COST)
-    species_CUE2 = param.compute_species_CUE(u2, R0_2, lambda_alpha2, MAINTENANCE_COST)
-    species_CUE3 = param.compute_species_CUE(u3, R0_3, lambda_alpha3, MAINTENANCE_COST)
 
     C_final1 = sol1.y[:N1, -1]
     C_final2 = sol2.y[:N2, -1]
     C_final3 = sol3.y[:N3, -1]
 
-    survivors1_t = np.where(C_final1 > SURVIVAL_THRESHOLD)[0]
-    survivors2_t = np.where(C_final2 > SURVIVAL_THRESHOLD)[0]
-    survivors3_t = np.where(C_final3 > SURVIVAL_THRESHOLD)[0]
+    # CUE calculations
+    species_CUE1 = param.compute_species_CUE(u1, R0_1, LEAKAGE_RATE, MAINTENANCE_COST)
+    species_CUE2 = param.compute_species_CUE(u2, R0_2, LEAKAGE_RATE, MAINTENANCE_COST)
+    species_CUE3 = param.compute_species_CUE(u3, R0_3, LEAKAGE_RATE, MAINTENANCE_COST)
 
-    community_CUE1 = param.safe_weighted_average(species_CUE1[survivors1_t], C_final1[survivors1_t])
-    community_CUE2 = param.safe_weighted_average(species_CUE2[survivors2_t], C_final2[survivors2_t])
-    community_CUE3 = param.safe_weighted_average(species_CUE3[survivors3_t], C_final3[survivors3_t])
+    # Survivors
+    survivors1 = np.where(C_final1 > SURVIVAL_THRESHOLD)[0]
+    survivors2 = np.where(C_final2 > SURVIVAL_THRESHOLD)[0]
+    survivors3 = np.where(C_final3 > SURVIVAL_THRESHOLD)[0]
 
-    L_eff1 = param.calculate_effective_leakage(u1, l1)
-    L_eff2 = param.calculate_effective_leakage(u2, l2)
-    L_eff3 = param.calculate_effective_leakage(u3, l3)
+    community_CUE1 = param.safe_weighted_average(species_CUE1[survivors1], C_final1[survivors1])
+    community_CUE2 = param.safe_weighted_average(species_CUE2[survivors2], C_final2[survivors2])
+    community_CUE3 = param.safe_weighted_average(species_CUE3[survivors3], C_final3[survivors3])
 
-    facilitation1 = np.mean(L_eff1, axis=1)
-    facilitation2 = np.mean(L_eff2, axis=1)
-    facilitation3 = np.mean(L_eff3, axis=1)
-
+    # Competition metrics
     competition_comm1 = param.community_level_competition(u1)
     competition_comm2 = param.community_level_competition(u2)
     competition_comm3 = param.community_level_competition(u3)
@@ -123,29 +127,46 @@ def simulate(seed):
     competition_dot2 = param.species_level_competition_dot(u2)
     competition_dot3 = param.species_level_competition_dot(u3)
 
+    # Facilitation metrics
+    L_eff1 = param.calculate_effective_leakage(u1, l1)
+    L_eff2 = param.calculate_effective_leakage(u2, l2)
+    L_eff3 = param.calculate_effective_leakage(u3, l3)
+
+    facilitation1 = np.mean(L_eff1, axis=1)
+    facilitation2 = np.mean(L_eff2, axis=1)
+    facilitation3 = np.mean(L_eff3, axis=1)
+
+    # Uptake variance
     uptake_var1 = param.compute_uptake_variance(u1)
     uptake_var2 = param.compute_uptake_variance(u2)
     uptake_var3 = param.compute_uptake_variance(u3)
 
+    # Resource depletion
     depletion1 = np.sum(sol1.y[N1:, -1])
     depletion2 = np.sum(sol2.y[N2:, -1])
     depletion3 = np.sum(sol3.y[N3:, -1])
 
+    # Total abundance
     total_abundance1 = np.sum(C_final1)
     total_abundance2 = np.sum(C_final2)
     total_abundance3 = np.sum(C_final3)
 
+    # Dominance in merged community
     origin1_in_coalesced = np.sum(C_final3[:N1])
     origin2_in_coalesced = np.sum(C_final3[N1:])
-    dominant = "Community 1" if origin1_in_coalesced > origin2_in_coalesced else "Community 2"
+    dominant = "Community1" if origin1_in_coalesced > origin2_in_coalesced else "Community2"
 
+    # Exp
     species_data = []
 
+    # Community 1 data
     for i in range(N1):
         species_data.append({
             "Seed": seed,
+            "DilutionRate": dilution_rate,
             "Community": 1,
             "Species_ID": i + 1,
+            "Origin": "Comm1",
             "Species_CUE": species_CUE1[i],
             "Community_CUE": community_CUE1,
             "Abundance": C_final1[i],
@@ -156,14 +177,18 @@ def simulate(seed):
             "Species_Competition_Dot": competition_dot1[i],
             "Facilitation": facilitation1[i],
             "Depletion": depletion1,
-            "UptakeVar": uptake_var1[i]
+            "UptakeVar": uptake_var1[i],
+            "Species_Index": int(species_indices1[i])
         })
 
+    # Community 2 data
     for i in range(N2):
         species_data.append({
             "Seed": seed,
+            "DilutionRate": dilution_rate,
             "Community": 2,
             "Species_ID": i + 1,
+            "Origin": "Comm2",
             "Species_CUE": species_CUE2[i],
             "Community_CUE": community_CUE2,
             "Abundance": C_final2[i],
@@ -174,14 +199,21 @@ def simulate(seed):
             "Species_Competition_Dot": competition_dot2[i],
             "Facilitation": facilitation2[i],
             "Depletion": depletion2,
-            "UptakeVar": uptake_var2[i]
+            "UptakeVar": uptake_var2[i],
+            "Species_Index": int(species_indices2[i])
         })
 
+    # Community 3 data
     for i in range(N3):
+        origin = "Comm1" if i < N1 else "Comm2"
+        species_index = int(species_indices1[i]) if i < N1 else int(species_indices2[i - N1])
+        
         species_data.append({
             "Seed": seed,
+            "DilutionRate": dilution_rate,
             "Community": 3,
             "Species_ID": i + 1,
+            "Origin": origin,
             "Species_CUE": species_CUE3[i],
             "Community_CUE": community_CUE3,
             "Abundance": C_final3[i],
@@ -192,28 +224,47 @@ def simulate(seed):
             "Species_Competition_Dot": competition_dot3[i],
             "Facilitation": facilitation3[i],
             "Depletion": depletion3,
-            "UptakeVar": uptake_var3[i]
+            "UptakeVar": uptake_var3[i],
+            "Species_Index": species_index
         })
 
     return species_data
 
 
 def main():
+    """Main function to run rare species invasion simulations."""
+    # Generate random seeds
     seed_generator = np.random.default_rng(BASE_SEED)
     seeds = seed_generator.integers(0, 2**32 - 1, size=N_SIMULATIONS, dtype=np.uint32).tolist()
 
-    with Pool(cpu_count()) as pool:
-        all_species_data_nested = pool.map(simulate, seeds)
+    # Create parameter combinations
+    param_list = [(seed, dr) for seed in seeds for dr in DILUTION_RATES]
 
-    all_species_data = [
+    print(f"Starting rare species invasion simulations...")
+    print(f"  - Number of seeds: {len(seeds)}")
+    print(f"  - Dilution rates: {DILUTION_RATES}")
+    print(f"  - Total simulations: {len(param_list)}")
+    print(f"  - CPU cores: {cpu_count()}")
+
+    # Run parallel simulations
+    with Pool(cpu_count()) as pool:
+        all_data_nested = pool.map(simulate, param_list)
+
+    # Flatten results
+    all_data = [
         row
-        for one_seed_result in all_species_data_nested
-        if one_seed_result
-        for row in one_seed_result
+        for result in all_data_nested
+        if result
+        for row in result
     ]
 
-    df = pd.DataFrame(all_species_data)
-    df.to_csv(COAL_FILE, index=False)
+    # Save detailed results
+    df = pd.DataFrame(all_data)
+    os.makedirs(DATA_DIR, exist_ok=True)
+    df.to_csv(RARE_FILE, index=False)
+
+    print(f"\nSimulation completed!")
+
 
 
 if __name__ == "__main__":
