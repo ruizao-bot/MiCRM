@@ -11,12 +11,13 @@ data_dir = os.path.join(project_root, "data")
 # Main function for resource overlap experiment
 def simulate_overlap(args):
     seed, overlap_ratio = args
+    rng = np.random.default_rng(seed)
     np.random.seed(seed)
     N_pool, M_pool, λ, N_modules, s_ratio = 1000, 100, 0.2, 1, 1.0
     N1, M1, N2, M2 = 100, 50, 100, 50
 
-    u_pool = param.modular_uptake(N_pool, M_pool, N_modules, s_ratio)
-    l_pool = param.generate_l_tensor(N_pool, M_pool, N_modules, s_ratio, λ, u_pool)
+    u_pool = param.modular_uptake(N_pool, M_pool, N_modules, s_ratio, rng)
+    l_pool = param.generate_l_tensor(N_pool, M_pool, N_modules, s_ratio, λ, u_pool, rng)
     rho_pool, omega_pool = np.full(M_pool, 0.6), np.full(M_pool, 0.1)
     t_span = (0, 100000)
     
@@ -86,18 +87,31 @@ def simulate_overlap(args):
     m3 = 0.2
     sol3 = param.solve_micrm(N3, M3, u3, l3, m3, lambda_alpha3, rho3, omega3, C0_3, R0_3, t_span)
 
-    # Calculate CUE and dominance
-    community_CUE1, species_CUE1 = param.compute_CUE(sol1, N1, u1, R0_1, lambda_alpha1, m1)
-    community_CUE2, species_CUE2 = param.compute_CUE(sol2, N2, u2, R0_2, lambda_alpha2, m2)
-    community_CUE3, species_CUE3 = param.compute_CUE(sol3, N3, u3, R0_3, lambda_alpha3, m3)
+    # Calculate CUE based on survivors only
+    C_final1 = sol1.y[:N1, -1]
+    C_final2 = sol2.y[:N2, -1]
     C_final3 = sol3.y[:N3, -1]
+    
+    # Compute species CUE
+    species_CUE1 = param.compute_species_CUE(u1, R0_1, lambda_alpha1, m1)
+    species_CUE2 = param.compute_species_CUE(u2, R0_2, lambda_alpha2, m2)
+    species_CUE3 = param.compute_species_CUE(u3, R0_3, lambda_alpha3, m3)
+    
+    # Get survivors (abundance > 1e-5)
+    survivors1 = np.where(C_final1 > 1e-5)[0]
+    survivors2 = np.where(C_final2 > 1e-5)[0]
+    survivors3 = np.where(C_final3 > 1e-5)[0]
+    
+    # Calculate community CUE based on survivors only
+    community_CUE1 = param.safe_weighted_average(species_CUE1[survivors1], C_final1[survivors1])
+    community_CUE2 = param.safe_weighted_average(species_CUE2[survivors2], C_final2[survivors2])
+    community_CUE3 = param.safe_weighted_average(species_CUE3[survivors3], C_final3[survivors3])
+    
     total_1, total_2 = np.sum(C_final3[:N1]), np.sum(C_final3[N1:])
     dominant = "Community 1" if total_1 > total_2 else "Community 2"
 
     # Compute Bray-Curtis similarity between coalesced and each parent
     # Parent 1 composition vector (N1 + N2): [sol1 final, zeros for parent 2 species]
-    C_final1 = sol1.y[:N1, -1]
-    C_final2 = sol2.y[:N2, -1]
     parent1_vec = np.concatenate([C_final1, np.zeros(N2)])
     parent2_vec = np.concatenate([np.zeros(N1), C_final2])
     coalesced_vec = C_final3

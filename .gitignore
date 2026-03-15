@@ -1,27 +1,18 @@
 
+*
+
+!.gitignore
+!README.md
+
 !code/
 !code/**
+
 !data/
-!results/
-!results/**
+!data/**
 
-micrm/
-micrm/**
-
-sanbox/
-sanbox/**
-
-__pycache__/
 **/__pycache__/
-.ipynb_checkpoints/
 **/.ipynb_checkpoints/
-.vscode/
-.virtual_documents/
-
+**/.DS_Store
 *.pyc
 *.log
 *.tmp
-*.pdf
-
-.DS_Store
-*.pptx

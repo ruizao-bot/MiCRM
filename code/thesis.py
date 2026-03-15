@@ -11,107 +11,84 @@ sys.path.append(code_path)
 project_root = os.path.abspath(os.path.join(code_path, os.pardir))
 data_dir = os.path.join(project_root, "data")
 
-# ============================================================================
-# FUNCTIONS FROM param.py
-# ============================================================================
-
-def modular_uptake(N, M, N_modules, s_ratio):
+def modular_uptake(N, M, N_modules, s_ratio, rng):
+    """生成模块化资源摄取矩阵 u。"""
     assert N_modules <= M and N_modules <= N, "N_modules must be less than or equal to both M and N"
 
-    # Baseline calculations
     sR = M // N_modules
     dR = M - (N_modules * sR)
 
     sC = N // N_modules
     dC = N - (N_modules * sC)
 
-    # Get module sizes for M
     diffR = np.full(N_modules, sR, dtype=int)
-    diffR[np.random.choice(N_modules, dR, replace=False)] += 1
+    if dR > 0:
+        diffR[rng.choice(N_modules, dR, replace=False)] += 1
     mR = [list(range(x - 1, y)) for x, y in zip((np.cumsum(diffR) - diffR + 1), np.cumsum(diffR))]
 
-    # Get module sizes for N
     diffC = np.full(N_modules, sC, dtype=int)
-    diffC[np.random.choice(N_modules, dC, replace=False)] += 1
+    if dC > 0:
+        diffC[rng.choice(N_modules, dC, replace=False)] += 1
     mC = [list(range(x - 1, y)) for x, y in zip((np.cumsum(diffC) - diffC + 1), np.cumsum(diffC))]
 
-    # Preallocate u matrix
-    u = np.random.rand(N, M)
+    u = rng.random((N, M))
 
-    # Apply scaling
     for x, y in zip(mC, mR):
         u[np.ix_(x, y)] *= s_ratio
-        
-    # Normalize each row
-    for i in range(N):
-        u[i, :] = u[i, :] / np.sum(u[i, :])
+
+    row_sums = np.sum(u, axis=1, keepdims=True)
+    u = u / row_sums
     return u
 
 
-def modular_leakage(M, N_modules, s_ratio, λ):
+def modular_leakage(M, N_modules, s_ratio, lam, rng):
     assert N_modules <= M, "N_modules must be less than or equal to M"
-
-    # Baseline
     sR = M // N_modules
     dR = M - (N_modules * sR)
 
-    # Get module sizes and add to make to M
     diffR = np.full(N_modules, sR, dtype=int)
-    diffR[np.random.choice(N_modules, dR, replace=False)] += 1
+    if dR > 0:
+        diffR[rng.choice(N_modules, dR, replace=False)] += 1
     mR = [list(range(x - 1, y)) for x, y in zip((np.cumsum(diffR) - diffR + 1), np.cumsum(diffR))]
 
-    l = np.random.rand(M, M)
+    l = rng.random((M, M))
 
     for i, x in enumerate(mR):
         for j, y in enumerate(mR):
             if i == j or i + 1 == j:
                 l[np.ix_(x, y)] *= s_ratio
 
-    for i in range(M):
-        l[i, :] = λ * l[i, :] / np.sum(l[i, :])
-
+    row_sums = np.sum(l, axis=1, keepdims=True)
+    l = lam * l / row_sums
     return l
 
 
-def generate_l_tensor(N, M, N_modules, s_ratio, λ, u):
-    l_template = modular_leakage(M, N_modules, s_ratio, λ)
-    l_tensor = np.repeat(l_template[np.newaxis, :, :], N, axis=0)
+def generate_l_tensor(N, M, N_modules, s_ratio, lam, u, rng):
+    l_tensor = np.zeros((N, M, M))
+    for i in range(N):
+        l_tensor[i] = modular_leakage(M, N_modules, s_ratio, lam, rng)
     return l_tensor
 
 
-def compute_CUE(sol, N, u, R0, λ, m):
-    """
-    Compute the community Carbon Use Efficiency (CUE) based on the weighted average of species CUE.
-    
-    Parameters:
-    sol: ODE solution object (output of solve_ivp)
-    N: Number of species (consumers)
-    u: Resource uptake matrix (N × M)
-    R0: Initial resource concentration (M,)
-    λ: Leakage rate (scalar)
-    m: Maintenance cost for each species (N,)
+def safe_weighted_average(values, weights):
+    """安全计算加权平均，避免分母为 0。"""
+    total_weight = np.sum(weights)
+    if total_weight <= 0:
+        return np.nan
+    return np.sum(values * weights) / total_weight
 
-    Returns:
-    community_CUE: The weighted average of species CUE
-    species_CUE: Individual CUE for each species (N,)
-    """
 
-    # Extract the steady-state biomass (last time point)
-    C_values = sol.y[:N, -1]  # Shape (N,)
+def compute_species_CUE(u, R_ref, lam, m):
+    """在给定资源状态 R_ref 下，计算每个物种的瞬时净增长效率指标（species CUE proxy）。"""
+    total_uptake = np.sum(u * R_ref, axis=1)
+    net_uptake = np.sum(u * R_ref * (1 - lam), axis=1) - m
+    species_CUE = net_uptake / (total_uptake + 1e-12)
+    return species_CUE
 
-    # Compute total resource uptake per species
-    total_uptake = np.sum(u * R0, axis=1)  # Shape (N,)
-    
-    # Compute net resource uptake (adjusted for leakage and metabolism)
-    net_uptake = np.sum(u * R0 * (1 - λ), axis=1) - m  # Shape (N,)
-    
-    # Compute species-level CUE
-    species_CUE = net_uptake / total_uptake  # Shape (N,)
 
-    # Compute community CUE as the weighted average of species CUE
-    community_CUE = np.sum(C_values * species_CUE) / np.sum(C_values)
-
-    return community_CUE, species_CUE
+def compute_community_CUE(species_CUE, C_ref):
+    """用同一时刻的消费者丰度 C_ref 对 species_CUE 做加权平均，得到瞬时群落 CUE。"""
+    return safe_weighted_average(species_CUE, C_ref)
 
 
 def solve_micrm(
@@ -166,6 +143,16 @@ def solve_micrm(
         events=equilibrium_event
     )
     return sol
+
+
+def extract_state_at_target_time(sol, N, omega):
+    """提取 t = 2 / omega 时刻的消费者丰度与资源浓度。"""
+    t_eff = 2
+    t_target = t_eff / np.mean(omega)
+    idx = np.argmin(np.abs(sol.t - t_target))
+    C_at_t = sol.y[:N, idx]
+    R_at_t = sol.y[N:, idx]
+    return C_at_t, R_at_t
 
 
 def calculate_effective_leakage(u, l):
@@ -251,7 +238,7 @@ def species_level_competition(u):
     return comp
 
 
-def competition2(C):
+def species_level_competition_dot(u):
     """
     Compute species-level competition based on the dot product (CCT).
     For each species i, compute the average dot product with all other species:
@@ -259,42 +246,34 @@ def competition2(C):
     where dot(C_i, C_j) = sum_k C[i, k] * C[j, k]
 
     Args:
-        C: (N, M) array, metabolic preference matrix for N species and M resources.
+        u: (N, M) array, uptake matrix for N species and M resources.
 
     Returns:
         comp: (N,) array, average competition pressure for each species.
     """
-    N, M = C.shape
+    N, M = u.shape
     if N < 2:
-        # If only one species, cannot compute competition with others
         return np.full(N, np.nan)
 
-    # 1. Compute competition matrix (dot products)
-    comp_matrix = C @ C.T
-
-    # 2. Exclude diagonal (self-competition)
+    comp_matrix = u @ u.T
     np.fill_diagonal(comp_matrix, 0.0)
-
-    # 3. Average over other species
     comp = np.sum(comp_matrix, axis=1) / (N - 1)
     return comp
 
-# ============================================================================
-# END OF FUNCTIONS FROM param.py
-# ============================================================================
 
-def compute_uptake_variance(u, N):
-    """Return a list of uptake variances for each species."""
-    return [np.var(u[i, :]) for i in range(N)]
+def compute_uptake_variance(u):
+    """计算每个物种摄取向量的方差。"""
+    return np.var(u, axis=1)
 
 def simulate(seed):
+    rng = np.random.default_rng(seed)
     np.random.seed(seed)
     
     N_pool, M_pool, λ, N_modules, s_ratio = 1000, 100, 0.2, 1, 1.0
     N1, M1, N2, M2 = 100, 50, 100, 50
 
-    u_pool = modular_uptake(N_pool, M_pool, N_modules, s_ratio)
-    l_pool = generate_l_tensor(N_pool, M_pool, N_modules, s_ratio, λ, u_pool)
+    u_pool = modular_uptake(N_pool, M_pool, N_modules, s_ratio, rng)
+    l_pool = generate_l_tensor(N_pool, M_pool, N_modules, s_ratio, λ, u_pool, rng)
     t_span = (0, 100000)  # Simulation time span
     species_indices1 = np.random.choice(N_pool, N1, replace=False)
     resource_indices1 = np.random.choice(M_pool, M1, replace=False)
@@ -366,34 +345,30 @@ def simulate(seed):
 
     L_eff3 = calculate_effective_leakage(u3, l3)
     Facilitation3 = np.mean(L_eff3, axis=1)
-    
-    # Calculate species CUE using resource concentrations at t = 20/omega
-    # But use equilibrium abundance (final time point) for community CUE weighting
-    _, species_CUE1 = compute_CUE(sol1, N1, u1, R_at_t1, lambda_alpha1, m1)
-    _, species_CUE2 = compute_CUE(sol2, N2, u2, R_at_t2, lambda_alpha2, m2)
-    _, species_CUE3 = compute_CUE(sol3, N3, u3, R_at_t3, lambda_alpha3, m3)
 
-    C_final1, C_final2, C_final3 = sol1.y[:N1, -1], sol2.y[:N2, -1], sol3.y[:N3, -1]
-    # Use equilibrium abundance for community CUE
-    community_CUE1 = np.sum(C_final1 * species_CUE1) / np.sum(C_final1)
-    community_CUE2 = np.sum(C_final2 * species_CUE2) / np.sum(C_final2)
-    community_CUE3 = np.sum(C_final3 * species_CUE3) / np.sum(C_final3)
+    C_final1 = sol1.y[:N1, -1]
+    C_final2 = sol2.y[:N2, -1]
+    C_final3 = sol3.y[:N3, -1]
 
-    C_final1, C_final2, C_final3 = sol1.y[:N1, -1], sol2.y[:N2, -1], sol3.y[:N3, -1]
-    total_1, total_2 = np.sum(C_final3[:N1]), np.sum(C_final3[N1:])
-    dominant = "Community 1" if total_1 > total_2 else "Community 2"
+    # Compute CUE using the new functions
+    species_CUE1 = compute_species_CUE(u1, R0_1, lambda_alpha1, m1)
+    species_CUE2 = compute_species_CUE(u2, R0_2, lambda_alpha2, m2)
+    species_CUE3 = compute_species_CUE(u3, R0_3, lambda_alpha3, m3)
 
-    # Calculate resource depletion
-    depletion1 = np.sum(sol1.y[N1:, -1])
-    depletion2 = np.sum(sol2.y[N2:, -1])
-    depletion3 = np.sum(sol3.y[N3:, -1])
+    community_CUE1 = compute_community_CUE(species_CUE1, C_final1)
+    community_CUE2 = compute_community_CUE(species_CUE2, C_final2)
+    community_CUE3 = compute_community_CUE(species_CUE3, C_final3)
 
-    # Get survivors and calculate competition
-    # Get survivors and calculate competition
+    # Get survivors and calculate survivor CUE
     survivors1 = np.where(C_final1 > 1e-5)[0]
     survivors2 = np.where(C_final2 > 1e-5)[0]
     survivors3 = np.where(C_final3 > 1e-5)[0]
 
+    community_CUE1_surv = safe_weighted_average(species_CUE1[survivors1], C_final1[survivors1])
+    community_CUE2_surv = safe_weighted_average(species_CUE2[survivors2], C_final2[survivors2])
+    community_CUE3_surv = safe_weighted_average(species_CUE3[survivors3], C_final3[survivors3])
+
+    # Calculate competition metrics
     competition1 = community_level_competition(u1)
     competition2 = community_level_competition(u2)
     competition3 = community_level_competition(u3)
@@ -402,20 +377,28 @@ def simulate(seed):
     species_competition2 = species_level_competition(u2)
     species_competition3 = species_level_competition(u3)
 
-    # Species-level competition2 (dot product)
-    species_competition2_1 = competition2(u1)
-    species_competition2_2 = competition2(u2)
-    species_competition2_3 = competition2(u3)
-
-    # Calculate community CUE for survivors
-    community_CUE1_surv = np.sum(C_final1[survivors1] * species_CUE1[survivors1]) / np.sum(C_final1[survivors1])
-    community_CUE2_surv = np.sum(C_final2[survivors2] * species_CUE2[survivors2]) / np.sum(C_final2[survivors2])
-    community_CUE3_surv = np.sum(C_final3[survivors3] * species_CUE3[survivors3]) / np.sum(C_final3[survivors3])
+    species_competition_dot1 = species_level_competition_dot(u1)
+    species_competition_dot2 = species_level_competition_dot(u2)
+    species_competition_dot3 = species_level_competition_dot(u3)
 
     # Calculate uptake variance
-    uptake_var1 = compute_uptake_variance(u1, N1)
-    uptake_var2 = compute_uptake_variance(u2, N2)
-    uptake_var3 = compute_uptake_variance(u3, N3)
+    uptake_var1 = compute_uptake_variance(u1)
+    uptake_var2 = compute_uptake_variance(u2)
+    uptake_var3 = compute_uptake_variance(u3)
+
+    # Calculate resource depletion
+    depletion1 = np.sum(sol1.y[N1:, -1])
+    depletion2 = np.sum(sol2.y[N2:, -1])
+    depletion3 = np.sum(sol3.y[N3:, -1])
+
+    # Calculate total abundances
+    total_abundance1 = np.sum(C_final1)
+    total_abundance2 = np.sum(C_final2)
+    total_abundance3 = np.sum(C_final3)
+
+    origin1_in_coalesced = np.sum(C_final3[:N1])
+    origin2_in_coalesced = np.sum(C_final3[N1:])
+    dominant = "Community 1" if origin1_in_coalesced > origin2_in_coalesced else "Community 2"
 
     # Build species data
     species_data = []
@@ -425,14 +408,13 @@ def simulate(seed):
             "Community": 1,
             "Species_ID": i + 1,
             "Species_CUE": species_CUE1[i],
-            "Community_CUE": community_CUE1,
-            "Community_CUE_surv": community_CUE1_surv,
+            "Community_CUE": community_CUE1_surv,
             "Abundance": C_final1[i],
-            "Total_Abundance": total_1,
+            "Total_Abundance": total_abundance1,
             "Dominant_Community": dominant,
             "Competition": competition1,
             "Species_Competition": species_competition1[i],
-            "Species_Competition2": species_competition2_1[i],
+            "Species_Competition_Dot": species_competition_dot1[i],
             "Facilitation": Facilitation1[i],
             "Depletion": depletion1,
             "UptakeVar": uptake_var1[i]
@@ -444,14 +426,13 @@ def simulate(seed):
             "Community": 2,
             "Species_ID": i + 1,
             "Species_CUE": species_CUE2[i],
-            "Community_CUE": community_CUE2,
-            "Community_CUE_surv": community_CUE2_surv,
+            "Community_CUE": community_CUE2_surv,
             "Abundance": C_final2[i],
-            "Total_Abundance": total_2,
+            "Total_Abundance": total_abundance2,
             "Dominant_Community": dominant,
             "Competition": competition2,
             "Species_Competition": species_competition2[i],
-            "Species_Competition2": species_competition2_2[i],
+            "Species_Competition_Dot": species_competition_dot2[i],
             "Facilitation": Facilitation2[i],
             "Depletion": depletion2,
             "UptakeVar": uptake_var2[i]
@@ -463,14 +444,13 @@ def simulate(seed):
             "Community": 3,
             "Species_ID": i + 1,
             "Species_CUE": species_CUE3[i],
-            "Community_CUE": community_CUE3,
-            "Community_CUE_surv": community_CUE3_surv,
+            "Community_CUE": community_CUE3_surv,
             "Abundance": C_final3[i],
-            "Total_Abundance": total_1 + total_2,
+            "Total_Abundance": total_abundance3,
             "Dominant_Community": dominant,
             "Competition": competition3,
             "Species_Competition": species_competition3[i],
-            "Species_Competition2": species_competition2_3[i],
+            "Species_Competition_Dot": species_competition_dot3[i],
             "Facilitation": Facilitation3[i],
             "Depletion": depletion3,
             "UptakeVar": uptake_var3[i]

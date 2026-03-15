@@ -28,7 +28,7 @@ base_theme <- theme_minimal(base_size = 12) +
   )
 
 # Load data
-df <- read.csv("data/coal.csv")
+df <- read.csv("coal.csv")
 df_select <- df %>% mutate(Status = ifelse(Abundance < 1e-5, "Extinction", "Survival"))
 df_surv <- df_select %>% filter(Abundance > 1e-5)
 
@@ -57,14 +57,32 @@ df_surv <- df_select %>% filter(Abundance > 1e-5)
 #        bg = "white")
 
 # FIGURE 1: Species CUE vs Abundance (final_plot)
-# Use all species (df), not just survivors (df_surv)
+# Use only survival species (df_surv)
 df_surv <- df_surv %>% mutate(log10_Abundance = log10(Abundance))
 df <- df %>% mutate(log10_Abundance = log10(Abundance))
 # Fit linear models and output diagnostics
 fit_diagnostics <- data.frame()
+cat("\n=== Linear Fit: log10(Abundance) ~ Species_CUE (Survival Species Only) ===\n")
+for (comm in c("1", "2", "3")) {
+  dat <- df_surv %>% filter(Community == comm)
+  model_fit <- lm(log10_Abundance ~ Species_CUE, data = dat)
+  fit_diagnostics <- rbind(fit_diagnostics, data.frame(
+    Community = comm,
+    R2 = summary(model_fit)$r.squared,
+    Slope = coef(model_fit)[2],
+    Intercept = coef(model_fit)[1],
+    P_value = summary(model_fit)$coefficients[2, 4],
+    N = nrow(dat)
+  ))
+}
+print(fit_diagnostics)
+df_surv <- df_surv %>% mutate(log10_Abundance = log10(Abundance))
+
+# Fit linear models and output diagnostics
+fit_diagnostics <- data.frame()
 cat("\n=== Linear Fit: log10(Abundance) ~ Species_CUE ===\n")
 for (comm in c("1", "2", "3")) {
-  dat <- df %>% filter(Community == comm)
+  dat <- df_surv %>% filter(Community == comm)
   model_fit <- lm(log10_Abundance ~ Species_CUE, data = dat)
   fit_diagnostics <- rbind(fit_diagnostics, data.frame(
     Community = comm,
@@ -77,26 +95,27 @@ for (comm in c("1", "2", "3")) {
 }
 print(fit_diagnostics)
 
-# Set uniform y-axis range across communities (using all species)
-y_min <- min(df$log10_Abundance, na.rm = TRUE)
-y_max <- max(df$log10_Abundance, na.rm = TRUE)
+# Set uniform y-axis range across communities
+y_min <- min(df_surv$log10_Abundance, na.rm = TRUE)
+y_max <- max(df_surv$log10_Abundance, na.rm = TRUE)
 
 # Generate plots for each community
 plots <- list()
 
 for (comm in c("1", "2", "3")) {
-  df_i <- df %>% filter(Community == comm)
-
+  df_i <- df_surv %>% filter(Community == comm)
+  
   # Main plot: CUE vs log10(Abundance)
   p_main <- ggplot(df_i, aes(x = Species_CUE, y = log10_Abundance)) +
-    geom_point(color = pal_rgb[comm], alpha = 0.3) +
+    geom_point(color = pal_rgb[comm], alpha = 0.5, shape = 16) +
+    # geom_smooth(method = "lm", se = TRUE, color = pal_rgb[comm], linewidth = 1) +
     ylim(y_min, y_max) +
     labs(x = "Species-level CUE", y = expression(log[10](Abundance))) +
     base_theme
-
+  
   # Side histogram
   p_hist <- ggplot(df_i, aes(x = log10_Abundance)) +
-    geom_histogram(bins = 50, fill = pal_rgb[comm], alpha = 0.3, color = pal_rgb[comm]) +
+    geom_histogram(bins = 50, fill = pal_rgb[comm], alpha = 0.5, color = pal_rgb[comm]) +
     xlim(y_min, y_max) +
     coord_flip() +
     scale_y_reverse() +
@@ -108,7 +127,7 @@ for (comm in c("1", "2", "3")) {
       panel.grid.major.y = element_blank(),
       plot.margin = margin(5, 5, 5, 5)
     )
-
+  
   p_combo <- p_hist + p_main + plot_layout(widths = c(1.2, 3))
   plots[[comm]] <- p_combo
 }
@@ -117,8 +136,8 @@ for (comm in c("1", "2", "3")) {
 final_plot <- wrap_plots(plots, ncol = 1) & base_theme
 final_plot
 
+
 # Export high-resolution images
-ggsave("results/cue_abund.png", plot = final_plot, width = 16, height = 20, units = "cm", dpi = 600, bg = "white")
 ggsave("results/cue_abund.pdf",
        plot = final_plot,
        device = cairo_pdf,
@@ -164,13 +183,6 @@ p_comp_cue_combined <- ggplot(df_comm_agg, aes(x = Competition, y = Community_CU
     legend.position = "none"
   )
 print(p_comp_cue_combined)
-ggsave("results/Competition_vs_communityCUE.png",
-  plot = p_comp_cue_combined,
-  width = 8,
-  height = 18,
-  units = "cm",
-  dpi = 600,
-  bg = "white")
 ggsave("results/Competition_vs_communityCUE.pdf",
   plot = p_comp_cue_combined,
   device = cairo_pdf,
@@ -180,7 +192,7 @@ ggsave("results/Competition_vs_communityCUE.pdf",
   dpi = 600,
   bg = "white")
 #Species competition
-p_species_comp2_cue <- ggplot(df_surv, aes(x = Species_Competition2, y = Species_CUE,
+p_species_comp_cue <- ggplot(df_surv, aes(x = Species_Competition_Dot, y = Species_CUE,
                                            color = factor(Community))) +
   geom_point(size = 1.5, shape = 16, alpha = 0.6) +
   facet_wrap(~ Community, ncol = 1, strip.position = "right",
@@ -198,18 +210,10 @@ p_species_comp2_cue <- ggplot(df_surv, aes(x = Species_Competition2, y = Species
     legend.position = "none"
   )
 
-print(p_species_comp2_cue)
+print(p_species_comp_cue)
 
-ggsave("results/Species_Competition2_vs_CUE.png",
-       plot = p_species_comp2_cue,
-       width = 21,
-       height = 18,
-       units = "cm",
-       dpi = 600,
-       bg = "white")
-
-ggsave("results/Species_Competition2_vs_CUE.pdf",
-       plot = p_species_comp2_cue,
+ggsave("results/species_competition.pdf",
+       plot = p_species_comp_cue,
        device = cairo_pdf,
        width = 21,
        height = 18,
@@ -225,12 +229,15 @@ df_comm_fac <- df_surv %>%
     Facilitation = mean(Facilitation),
     .groups = "drop"
   )
-
 p_fac_cue_combined <- ggplot(df_comm_fac, aes(x = Facilitation, y = Community_CUE, color = as.character(Community))) +
-  geom_point(size = 2, alpha = 0.7, shape = 16) +
+  geom_point(size = 1.5, alpha = 0.7, shape = 16) +
   facet_wrap(~Community, nrow = 1, labeller = labeller(Community = community_labels)) +
   scale_color_manual(values = pal_rgb) +
-  scale_x_continuous(labels = function(x) sprintf("%.2f", x * 1e3)) +
+  scale_x_continuous(
+    breaks = c(0.00108, 0.00110, 0.00112, 0.00114), 
+    limits = c(0.00106, 0.00116), 
+    labels = function(x) sprintf("%.2f", x * 1e3)
+  ) +
   labs(
     x = expression(Facilitation~(x10^{-3})),
     y = "Community CUE"
@@ -238,20 +245,16 @@ p_fac_cue_combined <- ggplot(df_comm_fac, aes(x = Facilitation, y = Community_CU
   base_theme +
   theme(
     legend.position = "none",
+    panel.spacing.x = unit(1, "cm"), 
+    axis.text.x = element_text(size = 10),
     strip.background = element_blank(),
     strip.text = element_text(face = "plain", family = "Times New Roman", size = 12),
     panel.grid.major = element_line(color = "grey90", linewidth = 0.3),
-    panel.grid.minor = element_line(color = "grey95", linewidth = 0.15)
+    panel.grid.minor = element_blank()
   )
 
 print(p_fac_cue_combined)
-ggsave("results/Facilitation_vs_communityCUE.png",
-  plot = p_fac_cue_combined,
-  width = 21,
-  height = 12,
-  units = "cm",
-  dpi = 600,
-  bg = "white")
+
 ggsave("results/Facilitation_vs_communityCUE.pdf",
   plot = p_fac_cue_combined,
   device = cairo_pdf,
@@ -398,9 +401,7 @@ ggsave("results/dom_sim.pdf",
        plot = p_cue_sim_domin,
        device = cairo_pdf,
        width = 21, height = 12, units = "cm", dpi = 600, bg = "white")
-ggsave("results/dom_sim.png",
-       plot = p_cue_sim_domin,
-       width = 16, height = 10, units = "cm", dpi = 600, bg = "white")
+
 
 # FIGURE 4B: CUE vs Dominance under Different Resource Overlap
 
