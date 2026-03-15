@@ -8,7 +8,8 @@
 !code/**
 
 !data/
-!data/**
+data/*
+!data/.gitkeep
 
 !results/
 results/*
