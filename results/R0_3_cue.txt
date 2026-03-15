@@ -1,8 +1,0 @@
-R03 = [0.33898001 0.33161773 0.33038393 0.37850063 0.30281873]
-Total numerical integral of community 3 CUE: 0.6899
-
-R03 = [0.36476421 0.35581435 0.35929298 0.37136169 0.36544662]
-Total numerical integral of community 3 CUE: 0.6813
-
-R03 = [0.72952841 0.7116287  0.71858597 0.74272339 0.73089323]
-Total numerical integral of community 3 CUE: 0.5335
