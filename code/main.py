@@ -3,13 +3,15 @@ import numpy as np
 import pandas as pd
 from scipy.integrate import solve_ivp
 import param
+from overlap_species import (adaptive_ridge, compute_proxies_from_A,
+                             map_log_volume_to_feasible_proxies)
 
 # Random seed and simulation parameters
-BASE_SEED = 50
+BASE_SEED = 37
 N_SIMULATIONS = 50
 
 # Exported file names
-COAL_FILE = "coal.csv"
+COAL_FILE = "data/coal.csv"
 
 # Species pooland resource pool parameters
 N_POOL = 1000
@@ -33,6 +35,7 @@ R0_VALUE = 1
 
 # Survival threshold
 SURVIVAL_THRESHOLD = 1e-5
+EV_THRESHOLD = 0.00
 
 def simulate(seed):
     rng = np.random.default_rng(seed)
@@ -67,6 +70,21 @@ def simulate(seed):
 
     sol1 = param.solve_micrm(N1, M1, u1, l1, MAINTENANCE_COST, lambda_alpha1, rho1, omega1, C0_1, R0_1, T_SPAN)
     sol2 = param.solve_micrm(N2, M2, u2, l2, MAINTENANCE_COST, lambda_alpha2, rho2, omega2, C0_2, R0_2, T_SPAN)
+
+    # Early stability check: skip seed if either parent community is unstable
+    C_final1 = sol1.y[:N1, -1]
+    C_final2 = sol2.y[:N2, -1]
+    R_final1 = sol1.y[N1:, -1]
+    R_final2 = sol2.y[N2:, -1]
+    lambda_vec1 = np.full(N1, LEAKAGE_RATE)
+    lambda_vec2 = np.full(N2, LEAKAGE_RATE)
+    J1 = param.MiCRM_jac(N1, M1, u1, l1, MAINTENANCE_COST, rho1, omega1, lambda_vec1, sol1)
+    ev1 = param.leading_eigenvalue(J1)
+    J2 = param.MiCRM_jac(N2, M2, u2, l2, MAINTENANCE_COST, rho2, omega2, lambda_vec2, sol2)
+    ev2 = param.leading_eigenvalue(J2)
+    if not (np.isfinite(ev1) and ev1 < EV_THRESHOLD and np.isfinite(ev2) and ev2 < EV_THRESHOLD):
+        return None
+
     C_final1 = sol1.y[:N1, -1]
     C_final2 = sol2.y[:N2, -1]
 
@@ -91,13 +109,16 @@ def simulate(seed):
     species_CUE2 = param.compute_species_CUE(u2, R0_2, lambda_alpha2, MAINTENANCE_COST)
     species_CUE3 = param.compute_species_CUE(u3, R0_3, lambda_alpha3, MAINTENANCE_COST)
 
-    C_final1 = sol1.y[:N1, -1]
-    C_final2 = sol2.y[:N2, -1]
     C_final3 = sol3.y[:N3, -1]
+    R_final3 = sol3.y[N3:, -1]
 
     survivors1_t = np.where(C_final1 > SURVIVAL_THRESHOLD)[0]
     survivors2_t = np.where(C_final2 > SURVIVAL_THRESHOLD)[0]
     survivors3_t = np.where(C_final3 > SURVIVAL_THRESHOLD)[0]
+
+    survivors1_count = len(survivors1_t)
+    survivors2_count = len(survivors2_t)
+    survivors3_count = len(survivors3_t)
 
     community_CUE1 = param.safe_weighted_average(species_CUE1[survivors1_t], C_final1[survivors1_t])
     community_CUE2 = param.safe_weighted_average(species_CUE2[survivors2_t], C_final2[survivors2_t])
@@ -138,6 +159,36 @@ def simulate(seed):
     origin1_in_coalesced = np.sum(C_final3[:N1])
     origin2_in_coalesced = np.sum(C_final3[N1:])
     dominant = "Community 1" if origin1_in_coalesced > origin2_in_coalesced else "Community 2"
+    lambda_vec3 = np.full(N3, LEAKAGE_RATE)
+    alpha1, r1 = param.calculate_elv_params(C_final1, R_final1, N1, M1, u1, l1, MAINTENANCE_COST, rho1, omega1, lambda_vec1)
+    alpha2, r2 = param.calculate_elv_params(C_final2, R_final2, N2, M2, u2, l2, MAINTENANCE_COST, rho2, omega2, lambda_vec2)
+    alpha3, r3 = param.calculate_elv_params(C_final3, R_final3, N3, M3, u3, l3, MAINTENANCE_COST, rho3, omega3, lambda_vec3)
+
+    # Feasibility via spectral proxy (adaptive ridge + SVD log-volume)
+    mask1 = C_final1 > SURVIVAL_THRESHOLD
+    mask2 = C_final2 > SURVIVAL_THRESHOLD
+    mask3 = C_final3 > SURVIVAL_THRESHOLD
+
+    def _feas_proxy(alpha, mask):
+        if not np.any(mask):
+            return 0.0, np.nan, np.nan, "no_survivors"
+        A_surv = alpha[np.ix_(mask, mask)]
+        reg = adaptive_ridge(A_surv)
+        if reg is None:
+            return 0.0, np.nan, np.nan, "ridge_failed"
+        proxies = compute_proxies_from_A(reg["A_reg"])
+        mapped = map_log_volume_to_feasible_proxies(proxies["log_volume"], int(np.sum(mask)))
+        return (float(mapped["feasible_volume_proxy"]),
+                float(mapped["log10_feasible_volume_proxy"]),
+                float(mapped["feasible_scale_per_dim"]),
+                "ok")
+
+    feas1_val, log10_feas1, feas1_scale, feas1_status = _feas_proxy(alpha1, mask1)
+    feas2_val, log10_feas2, feas2_scale, feas2_status = _feas_proxy(alpha2, mask2)
+    feas3_val, log10_feas3, feas3_scale, feas3_status = _feas_proxy(alpha3, mask3)
+    J3 = param.MiCRM_jac(N3, M3, u3, l3, MAINTENANCE_COST, rho3, omega3, lambda_vec3, sol3)
+    ev3 = param.leading_eigenvalue(J3)
+
 
     species_data = []
 
@@ -156,7 +207,12 @@ def simulate(seed):
             "Species_Competition_Dot": competition_dot1[i],
             "Facilitation": facilitation1[i],
             "Depletion": depletion1,
-            "UptakeVar": uptake_var1[i]
+            "N_Survivors": survivors1_count,
+            "feasibility": feas1_val,
+            "log10_feasibility": log10_feas1,
+            "feasible_scale_per_dim": feas1_scale,
+            "feasibility_status": feas1_status,
+            "Leading_Eigenvalue": float(ev1)
         })
 
     for i in range(N2):
@@ -174,7 +230,13 @@ def simulate(seed):
             "Species_Competition_Dot": competition_dot2[i],
             "Facilitation": facilitation2[i],
             "Depletion": depletion2,
-            "UptakeVar": uptake_var2[i]
+            "UptakeVar": uptake_var2[i],
+            "N_Survivors": survivors2_count,
+            "feasibility": feas2_val,
+            "log10_feasibility": log10_feas2,
+            "feasible_scale_per_dim": feas2_scale,
+            "feasibility_status": feas2_status,
+            "Leading_Eigenvalue": float(ev2)
         })
 
     for i in range(N3):
@@ -192,7 +254,13 @@ def simulate(seed):
             "Species_Competition_Dot": competition_dot3[i],
             "Facilitation": facilitation3[i],
             "Depletion": depletion3,
-            "UptakeVar": uptake_var3[i]
+            "UptakeVar": uptake_var3[i],
+            "N_Survivors": survivors3_count,
+            "feasibility": feasible_volume_proxy,
+            "log10_feasibility": log10_feas3,
+            "feasible_scale_per_dim": feas3_scale,
+            "feasibility_status": feas3_status,
+            "Leading_Eigenvalue": float(ev3)
         })
 
     return species_data

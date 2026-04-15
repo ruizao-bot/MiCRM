@@ -45,7 +45,7 @@ def set_base_theme(ax):
     ax.tick_params(width=0.3, length=4)
 
 # Load data
-df = pd.read_csv("coal.csv")
+df = pd.read_csv("data/coal.csv")
 df['Status'] = df['Abundance'].apply(lambda x: "Extinction" if x < 1e-5 else "Survival")
 df_surv = df[df['Abundance'] > 1e-5].copy()
 
@@ -218,44 +218,138 @@ plt.savefig('results/cue_dominance_overlap.pdf', dpi=600, bbox_inches='tight')
 print("Saved: results/cue_dominance_overlap.pdf")
 plt.close()
 
-# FIGURE 2: Species CUE vs Abundance
-# Set uniform y-axis range
-y_min = df_surv['log10_Abundance'].min()
-y_max = df_surv['log10_Abundance'].max()
 
-# Create combined plot
-fig, axes = plt.subplots(3, 2, figsize=(8.27, 7.87), 
-                         gridspec_kw={'width_ratios': [1.2, 3], 'hspace': 0.3})
+# Figurec 2 Species CUE vs log10(Abundance) with Theoretical Curve (Dual Axis)
+# Load data
+df_coal = pd.read_csv("data/coal.csv")
+df_coal['Community'] = df_coal['Community'].astype(str)
+df_coal_surv = df_coal[df_coal['Abundance'] > 1e-5].copy()
+df_coal_surv['log10_Abundance'] = np.log10(df_coal_surv['Abundance'])
 
-for idx, comm in enumerate(["1", "2", "3"]):
-    df_i = df_surv[df_surv['Community'] == int(comm)]
-    color = pal_rgb[comm]
-    
-    # Histogram (left)
-    ax_hist = axes[idx, 0]
-    ax_hist.hist(df_i['log10_Abundance'], bins=50, orientation='horizontal',
-                 color=color, alpha=0.5, edgecolor=color)
-    ax_hist.set_ylim(y_min, y_max)
-    ax_hist.invert_xaxis()
-    ax_hist.set_ylabel('Frequency' if idx == 1 else '')
-    ax_hist.set_yticks([])
-    set_base_theme(ax_hist)
-    
-    # Scatter plot (right)
-    ax_main = axes[idx, 1]
-    ax_main.scatter(df_i['Species_CUE'], df_i['log10_Abundance'],
-                   color=color, alpha=0.5, s=20)
+# Load theory parameters
+theory_params_df = pd.read_csv("data/coal_theory_curve_parameters.csv")
+theory_params_df['Community'] = theory_params_df['Community'].astype(str)
+
+# Define theory function
+def cue_abundance_theory(eps, eps_c, H, Cmax):
+    eps = np.asarray(eps, dtype=float)
+    if not np.isfinite(eps_c) or not np.isfinite(H) or not np.isfinite(Cmax):
+        return np.full_like(eps, np.nan, dtype=float)
+    H = max(float(H), 1e-12)
+    Cmax = max(float(Cmax), 1e-12)
+    delta = np.maximum(eps - eps_c, 0.0)
+    return Cmax * (1.0 - np.exp(-delta / H))
+
+# Get y-axis limits
+y_min = np.nanmin(df_coal_surv["log10_Abundance"])
+y_max = np.nanmax(df_coal_surv["log10_Abundance"])
+
+# Create figure
+fig = plt.figure(figsize=(8, 12))
+gs = fig.add_gridspec(3, 2, width_ratios=[1.2, 3], hspace=0.35, wspace=0.05)
+
+for i, comm in enumerate(["1", "2", "3"]):
+    # Filter data for this community
+    dat_surv = df_coal_surv[df_coal_surv["Community"] == comm].copy()
+    dat_surv = dat_surv[np.isfinite(dat_surv["Species_CUE"]) & np.isfinite(dat_surv["log10_Abundance"])]
+
+    dat_full = df_coal[df_coal["Community"] == comm].copy()
+    dat_full = dat_full[np.isfinite(dat_full["Species_CUE"]) & np.isfinite(dat_full["Abundance"])]
+
+    # Create subplots
+    ax_hist = fig.add_subplot(gs[i, 0])
+    ax_main = fig.add_subplot(gs[i, 1])
+
+    # Scatter plot
+    ax_main.scatter(
+        dat_surv["Species_CUE"],
+        dat_surv["log10_Abundance"],
+        s=18,
+        alpha=0.3,
+        color=pal_rgb[comm],
+        edgecolors="none"
+    )
+
     ax_main.set_ylim(y_min, y_max)
-    ax_main.set_xlabel('Species-level CUE' if idx == 2 else '')
-    ax_main.set_ylabel('log10(Abundance)')
+    ax_main.set_xlabel("Species-level CUE")
+    ax_main.set_ylabel(r"$\log_{10}(\mathrm{Abundance})$")
+    ax_main.set_title(community_labels[comm], loc="right")
     set_base_theme(ax_main)
 
+    # Create twin axis for theory curve
+    ax_theory = ax_main.twinx()
+    ax_theory.set_zorder(ax_main.get_zorder() + 1)
+    ax_theory.patch.set_alpha(0.0)
+    ax_theory.grid(False)
+
+    ax_theory.set_ylabel("Theoretical abundance", color="black")
+    ax_theory.tick_params(axis="y", colors="black", width=0.3)
+
+    for spine in ax_theory.spines.values():
+        spine.set_visible(True)
+        spine.set_color("black")
+        spine.set_linewidth(0.3)
+
+    # Get theory parameters for this community
+    params_row = theory_params_df[theory_params_df["Community"] == comm]
+    
+    if len(params_row) > 0 and np.isfinite(params_row["eps_c"].iloc[0]):
+        eps_c = params_row["eps_c"].iloc[0]
+        H = params_row["H"].iloc[0]
+        Cmax = params_row["Cmax"].iloc[0]
+
+        # Generate theory curve
+        x_grid = np.linspace(dat_full["Species_CUE"].min(), dat_full["Species_CUE"].max(), 800)
+        c_theory = cue_abundance_theory(x_grid, eps_c, H, Cmax)
+
+        valid = np.isfinite(c_theory) & (c_theory > 1e-5)
+
+        if np.any(valid):
+            ax_theory.set_yscale("log")
+            ax_theory.set_ylim(
+                max(np.nanmin(c_theory[valid]), 1e-5),
+                np.nanmax(c_theory[valid]) * 1.05
+            )
+
+            ax_theory.plot(
+                x_grid[valid],
+                c_theory[valid],
+                color="black",
+                linewidth=2.0,
+                zorder=10
+            )
+        else:
+            ax_theory.set_yscale("log")
+            ax_theory.set_ylim(1e-5, 1.0)
+    else:
+        ax_theory.set_yscale("log")
+        ax_theory.set_ylim(1e-5, 1.0)
+
+    # Histogram
+    ax_hist.hist(
+        dat_surv["log10_Abundance"].dropna(),
+        bins=50,
+        orientation="horizontal",
+        color=pal_rgb[comm],
+        alpha=0.3,
+        edgecolor=pal_rgb[comm]
+    )
+    ax_hist.set_ylim(y_min, y_max)
+    ax_hist.invert_xaxis()
+    ax_hist.set_xlabel("Frequency")
+    ax_hist.set_ylabel("")
+    ax_hist.set_yticklabels([])
+    ax_hist.tick_params(axis="y", length=0)
+    set_base_theme(ax_hist)
+
 plt.tight_layout()
-plt.savefig('results/cue_abund.pdf', dpi=600, bbox_inches='tight')
-print("Saved: results/cue_abund.pdf")
+plt.savefig(
+    "data/coal_species_cue_vs_logabundance_with_theory_dual_axis.png",
+    dpi=300,
+    bbox_inches="tight"
+)
+print("Saved: data/coal_species_cue_vs_logabundance_with_theory_dual_axis.png")
 plt.close()
-
-
 # FIGURE 3: Rare Species Invasion
 df_rare = pd.read_csv("data/rare.csv")
 df_rare['survival'] = df_rare['Abundance'].apply(lambda x: "Survived" if x > 1e-5 else "Extinct")
