@@ -121,7 +121,7 @@ def compute_CUE(sol, N, u, R0, λ, m):
 
 def solve_micrm(
     N, M, u, l, m, lambda_alpha, rho, omega, C0, R0,
-    t_span, t_eval=None, tol=1e-5, method='BDF'
+    t_span, t_eval=None, tol=1e-5, method='BDF', n_save_points=100
 ):
     """Solve the MICRM model using solve_ivp with an event to detect equilibrium"""
     def dCdt_Rdt(t, y):
@@ -143,8 +143,8 @@ def solve_micrm(
     equilibrium_event.terminal = True
     equilibrium_event.direction = -1
 
-    if t_eval is None:
-        t_eval = np.linspace(t_span[0], t_span[1], 100)
+    if t_eval is None and n_save_points is not None and n_save_points > 0:
+        t_eval = np.linspace(t_span[0], t_span[1], int(n_save_points))
 
     Y0 = np.concatenate([C0, R0])
 
@@ -360,16 +360,17 @@ def leading_hermitian_eigenvalue(J):
     eigvals = np.linalg.eigvalsh(H)
     return np.max(eigvals)
 
-import rpy2.robjects as ro
-from rpy2.robjects import FloatVector
-from rpy2.robjects.packages import importr
-
 
 def feasibility_prob(alpha, eps=0.0, maxpts=None, abseps=1e-6, releps=0):
     """
     Compute P[X >= 0] using R mvtnorm::pmvnorm (Genz–Bretz algorithm),
     where X ~ N(0, Sigma) and Sigma = (A^-1)(A^-1)^T.
     """
+    # Lazy import rpy2 to avoid ModuleNotFoundError when rpy2 is not installed
+    import rpy2.robjects as ro
+    from rpy2.robjects import FloatVector
+    from rpy2.robjects.packages import importr
+    
     S = alpha.shape[0]
     if S == 0:
         return 0.0
@@ -560,3 +561,126 @@ def compute_community_metrics(u, C_eq, R_eq, survivors_idx):
         mean_cos_side  = mean_cos,
         std_cos_side   = std_cos,
     )
+
+# ===================== Adaptive ridge parameters =====================
+COND_MAX = 1e10
+EPS_REL_INIT = 1e-10
+EPS_REL_CAP = 1e-2
+EPS_GROWTH = 10.0
+EPS_REFINE_STEPS = 20
+
+def estimate_scale_for_eps(A):
+    diag = np.diag(A)
+    diag_abs = np.abs(diag[np.isfinite(diag)])
+    diag_abs = diag_abs[diag_abs > 0]
+    if diag_abs.size > 0:
+        scale = float(np.median(diag_abs))
+    else:
+        a_abs = np.abs(A[np.isfinite(A)])
+        a_abs = a_abs[a_abs > 0]
+        scale = float(np.median(a_abs)) if a_abs.size > 0 else 1.0
+    return max(scale, 1e-12)
+
+def adaptive_ridge(A,
+                  cond_max=COND_MAX,
+                  eps_rel_init=EPS_REL_INIT,
+                  eps_rel_cap=EPS_REL_CAP,
+                  growth=EPS_GROWTH,
+                  refine_steps=EPS_REFINE_STEPS):
+    """
+    Find the smallest eps_abs = eps_rel * scale such that:
+      cond(A + eps_abs I) <= cond_max
+    """
+    S = A.shape[0]
+    if S == 0:
+        return None
+    I = np.eye(S)
+    scale = estimate_scale_for_eps(A)
+
+    def ok_at(eps_rel):
+        eps_abs = eps_rel * scale
+        A_reg = A + eps_abs * I
+        try:
+            cond = float(np.linalg.cond(A_reg))
+        except np.linalg.LinAlgError:
+            return False, None
+        if (not np.isfinite(cond)) or (cond > cond_max):
+            return False, None
+        return True, {"A_reg": A_reg, "cond": cond, "eps_abs": eps_abs, "eps_rel": eps_rel, "scale": scale}
+
+    eps_rel = eps_rel_init
+    prev = None
+    ok, met = ok_at(eps_rel)
+    while (not ok) and (eps_rel < eps_rel_cap):
+        prev = eps_rel
+        eps_rel *= growth
+        ok, met = ok_at(eps_rel)
+
+    if not ok:
+        return None
+
+    lo = prev if prev is not None else eps_rel_init / growth
+    lo = max(lo, eps_rel_init / growth)
+    hi = eps_rel
+    best = met
+
+    for _ in range(refine_steps):
+        mid = np.sqrt(lo * hi)
+        okm, metm = ok_at(mid)
+        if okm:
+            hi = mid
+            best = metm
+        else:
+            lo = mid
+
+    best["status"] = "ok"
+    return best
+
+# ===================== C2: logdet / spectral proxies + feasibility-domain mapping =====================
+def compute_proxies_from_A(A_reg):
+    """
+    Returns:
+      - logdet(A A^T) = 2 * sum(log sigma_i)
+      - log_volume = -0.5 * logdet(A A^T)
+      - log_sigma_min, log_inv_spec, log_inv_frob
+      - sigma_min, sigma_max
+    """
+    s = np.linalg.svd(A_reg, compute_uv=False)
+    smin = float(np.min(s))
+    smax = float(np.max(s))
+
+    tiny = 1e-300
+    logdet_AAT = float(2.0 * np.sum(np.log(s + tiny)))
+    log_volume = float(-0.5 * logdet_AAT)
+    log_smin = float(np.log(smin + tiny))
+    log_inv_spec = float(-log_smin)
+
+    inv_frob = float(np.sqrt(np.sum(1.0 / (s * s + tiny))))
+    log_inv_frob = float(np.log(inv_frob + tiny))
+
+    return {
+        "sigma_min": smin,
+        "sigma_max": smax,
+        "logdet_AAT": logdet_AAT,
+        "log_volume": log_volume,
+        "log_sigma_min": log_smin,
+        "log_inv_spec": log_inv_spec,
+        "log_inv_frob": log_inv_frob,
+    }
+
+
+def map_log_volume_to_feasible_proxies(log_volume: float, S: int):
+    S = max(int(S), 1)
+    lv = float(log_volume)
+    feasible_volume_proxy = float(np.exp(np.clip(lv, -700, 700)))
+    feasible_scale_per_dim = float(np.exp(np.clip(lv / S, -700, 700)))
+
+    log10_feasible_volume_proxy = float(lv / np.log(10.0))
+    log10_feasible_scale_per_dim = float((lv / S) / np.log(10.0))
+
+    return {
+        "feasible_volume_proxy": feasible_volume_proxy,
+        "feasible_scale_per_dim": feasible_scale_per_dim,
+        "log10_feasible_volume_proxy": log10_feasible_volume_proxy,
+        "log10_feasible_scale_per_dim": log10_feasible_scale_per_dim,
+    }

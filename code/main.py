@@ -1,17 +1,18 @@
 from multiprocessing import Pool, cpu_count
 import numpy as np
 import pandas as pd
-from scipy.integrate import solve_ivp
+import os
+from scipy.integrate import cumulative_trapezoid
 import param
-from overlap_species import (adaptive_ridge, compute_proxies_from_A,
-                             map_log_volume_to_feasible_proxies)
 
 # Random seed and simulation parameters
 BASE_SEED = 37
-N_SIMULATIONS = 50
+N_SIMULATIONS = 100
 
 # Exported file names
 COAL_FILE = "data/coal.csv"
+COAL_SUMMARY_FILE = "data/coal_summary.csv"
+COAL_CUE_TIMESERIES_FILE = "data/coal_cue_timeseries.csv"
 
 # Species pooland resource pool parameters
 N_POOL = 1000
@@ -36,6 +37,111 @@ R0_VALUE = 1
 # Survival threshold
 SURVIVAL_THRESHOLD = 1e-5
 EV_THRESHOLD = 0.00
+
+INTE_CUE_N_SAVE_POINTS = 40
+
+
+# =============================================================================
+# Theory curve helper functions (from main_for_plot)
+# =============================================================================
+
+def _compute_eta(l):
+    """Per-species per-resource retention fraction from 3-D leakage tensor."""
+    return 1.0 - np.sum(l, axis=2) 
+
+
+def _ensure_m_vec(m, N):
+    if np.ndim(m) == 0:
+        return np.full(N, float(m))
+    m_vec = np.asarray(m, dtype=float)
+    assert m_vec.shape[0] == N
+    return m_vec
+
+
+def compute_Gi0_Ui0_eps(u, l, R0, m):
+    """Compute per-species Gi0, Ui0, and CUE (eps) at reference resource levels."""
+    N = u.shape[0]
+    eta = _compute_eta(l)          
+    m_vec = _ensure_m_vec(m, N)
+    Ui0 = np.sum(u * R0[None, :], axis=1)                    # total potential uptake
+    Gi0 = np.sum(u * eta * R0[None, :], axis=1)              # net growth flux
+    eps = (Gi0 - m_vec) / (Ui0 + 1e-12)                      # species CUE
+    return eta, Gi0, Ui0, eps
+
+def _flux_rates(u, l, R_t, m, N):
+    eta = 1.0 - np.sum(l, axis=2)  # (N, M)
+    uptake_pb_t = u @ R_t           # (N, T)
+    anab_gross_t = (u * eta) @ R_t  # (N, T)
+ 
+    if np.ndim(m) == 0:
+        m_vec = np.full(N, float(m))
+    else:
+        m_vec = np.asarray(m, dtype=float)
+ 
+    anab_pb_t = anab_gross_t - m_vec[:, None]
+    return uptake_pb_t, anab_pb_t
+ 
+ 
+def compute_actual_cue(u, l, sol, N, m, C0):
+    if sol.t is None or len(sol.t) < 2:
+        return np.full(N, np.nan)
+ 
+    t = sol.t
+    C_t = np.maximum(sol.y[:N, :], 0.0)
+    R_t = np.maximum(sol.y[N:, :], 0.0)
+ 
+    uptake_pb_t, anab_pb_t = _flux_rates(u, l, R_t, m, N)
+ 
+    # Absolute fluxes (multiply per-biomass rate by C_i(t))
+    uptake_abs_t = C_t * uptake_pb_t  # (N, T)
+    anab_abs_t = C_t * anab_pb_t      # (N, T)
+ 
+    total_uptake = np.trapezoid(uptake_abs_t, x=t, axis=1)  # (N,)
+    total_anab = np.trapezoid(anab_abs_t, x=t, axis=1)      # (N,)
+ 
+    actual_cue = np.divide(
+        total_anab,
+        total_uptake,
+        out=np.full(N, np.nan, dtype=float),
+        where=np.abs(total_uptake) > 1e-12
+    )
+    return actual_cue
+ 
+ 
+def compute_actual_community_cue(u, l, sol, N, m, C0, survivor_idx=None):
+    if sol.t is None or len(sol.t) < 2:
+        return np.nan
+ 
+    t = sol.t
+    C_t = np.maximum(sol.y[:N, :], 0.0)
+    R_t = np.maximum(sol.y[N:, :], 0.0)
+ 
+    if survivor_idx is not None:
+        survivor_idx = np.asarray(survivor_idx, dtype=int)
+        if survivor_idx.size == 0:
+            return np.nan
+        C_t = C_t[survivor_idx, :]
+        u = u[survivor_idx, :]
+        l = l[survivor_idx, :, :]
+        if np.ndim(m) > 0:
+            m = np.asarray(m)[survivor_idx]
+        N_eff = survivor_idx.size
+    else:
+        N_eff = N
+ 
+    uptake_pb_t, anab_pb_t = _flux_rates(u, l, R_t, m, N_eff)
+ 
+    # Sum absolute fluxes over species at each time point
+    uptake_comm_t = np.sum(C_t * uptake_pb_t, axis=0)  # (T,)
+    anab_comm_t = np.sum(C_t * anab_pb_t, axis=0)      # (T,)
+ 
+    total_uptake = np.trapezoid(uptake_comm_t, x=t)
+    total_anab = np.trapezoid(anab_comm_t, x=t)
+ 
+    if np.abs(total_uptake) < 1e-12:
+        return np.nan
+    return total_anab / total_uptake
+ 
 
 def simulate(seed):
     rng = np.random.default_rng(seed)
@@ -68,8 +174,14 @@ def simulate(seed):
     C0_2 = np.full(N2, C0_VALUE)
     R0_2 = np.full(M2, R0_VALUE)
 
-    sol1 = param.solve_micrm(N1, M1, u1, l1, MAINTENANCE_COST, lambda_alpha1, rho1, omega1, C0_1, R0_1, T_SPAN)
-    sol2 = param.solve_micrm(N2, M2, u2, l2, MAINTENANCE_COST, lambda_alpha2, rho2, omega2, C0_2, R0_2, T_SPAN)
+    sol1 = param.solve_micrm(
+        N1, M1, u1, l1, MAINTENANCE_COST, lambda_alpha1, rho1, omega1, C0_1, R0_1, T_SPAN,
+        n_save_points=INTE_CUE_N_SAVE_POINTS
+    )
+    sol2 = param.solve_micrm(
+        N2, M2, u2, l2, MAINTENANCE_COST, lambda_alpha2, rho2, omega2, C0_2, R0_2, T_SPAN,
+        n_save_points=INTE_CUE_N_SAVE_POINTS
+    )
 
     # Early stability check: skip seed if either parent community is unstable
     C_final1 = sol1.y[:N1, -1]
@@ -102,27 +214,49 @@ def simulate(seed):
     C0_3 = np.concatenate([sol1.y[:N1, -1], sol2.y[:N2, -1]])
     R0_3 = np.full(M3, R0_VALUE)
 
-    sol3 = param.solve_micrm(N3, M3, u3, l3, MAINTENANCE_COST, lambda_alpha3, rho3, omega3, C0_3, R0_3, T_SPAN)
-    C_final3 = sol3.y[:N3, -1]
+    sol3 = param.solve_micrm(
+        N3, M3, u3, l3, MAINTENANCE_COST, lambda_alpha3, rho3, omega3, C0_3, R0_3, T_SPAN,
+        n_save_points=INTE_CUE_N_SAVE_POINTS
+    )
 
-    species_CUE1 = param.compute_species_CUE(u1, R0_1, lambda_alpha1, MAINTENANCE_COST)
-    species_CUE2 = param.compute_species_CUE(u2, R0_2, lambda_alpha2, MAINTENANCE_COST)
-    species_CUE3 = param.compute_species_CUE(u3, R0_3, lambda_alpha3, MAINTENANCE_COST)
+    C_final1 = np.maximum(sol1.y[:N1, -1], 0.0)
+    C_final2 = np.maximum(sol2.y[:N2, -1], 0.0)
+    C_final3 = np.maximum(sol3.y[:N3, -1], 0.0)
+    R_final3 = np.maximum(sol3.y[N3:, -1], 0.0)
 
-    C_final3 = sol3.y[:N3, -1]
-    R_final3 = sol3.y[N3:, -1]
-
+    # Per-species CUE (using eta from l tensor for mechanistic consistency)
+    _, _, _, species_CUE1 = compute_Gi0_Ui0_eps(u1, l1, R0_1, MAINTENANCE_COST)
+    _, _, _, species_CUE2 = compute_Gi0_Ui0_eps(u2, l2, R0_2, MAINTENANCE_COST)
+    _, _, _, species_CUE3 = compute_Gi0_Ui0_eps(u3, l3, R0_3, MAINTENANCE_COST)
     survivors1_t = np.where(C_final1 > SURVIVAL_THRESHOLD)[0]
     survivors2_t = np.where(C_final2 > SURVIVAL_THRESHOLD)[0]
     survivors3_t = np.where(C_final3 > SURVIVAL_THRESHOLD)[0]
+
+    actual_CUE1 = compute_actual_cue(u1, l1, sol1, N1, MAINTENANCE_COST, C0_1)
+    actual_CUE2 = compute_actual_cue(u2, l2, sol2, N2, MAINTENANCE_COST, C0_2)
+    actual_CUE3 = compute_actual_cue(u3, l3, sol3, N3, MAINTENANCE_COST, C0_3)
+    actual_community_CUE1 = compute_actual_community_cue(
+        u1, l1, sol1, N1, MAINTENANCE_COST, C0_1, survivor_idx=survivors1_t
+    )
+    actual_community_CUE2 = compute_actual_community_cue(
+        u2, l2, sol2, N2, MAINTENANCE_COST, C0_2, survivor_idx=survivors2_t
+    )
+    actual_community_CUE3 = compute_actual_community_cue(
+        u3, l3, sol3, N3, MAINTENANCE_COST, C0_3, survivor_idx=survivors3_t
+    )
+
 
     survivors1_count = len(survivors1_t)
     survivors2_count = len(survivors2_t)
     survivors3_count = len(survivors3_t)
 
+    # Community CUE is computed on surviving species only.
     community_CUE1 = param.safe_weighted_average(species_CUE1[survivors1_t], C_final1[survivors1_t])
     community_CUE2 = param.safe_weighted_average(species_CUE2[survivors2_t], C_final2[survivors2_t])
     community_CUE3 = param.safe_weighted_average(species_CUE3[survivors3_t], C_final3[survivors3_t])
+    community_CUE1_surv = param.safe_weighted_average(species_CUE1[survivors1_t], C_final1[survivors1_t])
+    community_CUE2_surv = param.safe_weighted_average(species_CUE2[survivors2_t], C_final2[survivors2_t])
+    community_CUE3_surv = param.safe_weighted_average(species_CUE3[survivors3_t], C_final3[survivors3_t])
 
     L_eff1 = param.calculate_effective_leakage(u1, l1)
     L_eff2 = param.calculate_effective_leakage(u2, l2)
@@ -168,102 +302,106 @@ def simulate(seed):
     mask1 = C_final1 > SURVIVAL_THRESHOLD
     mask2 = C_final2 > SURVIVAL_THRESHOLD
     mask3 = C_final3 > SURVIVAL_THRESHOLD
+    m1 = param.map_log_volume_to_feasible_proxies(
+    param.compute_proxies_from_A(param.adaptive_ridge(alpha1[np.ix_(mask1, mask1)])["A_reg"])["log_volume"],
+    int(np.sum(mask1))
+)
+    m2 = param.map_log_volume_to_feasible_proxies(
+    param.compute_proxies_from_A(param.adaptive_ridge(alpha2[np.ix_(mask2, mask2)])["A_reg"])["log_volume"],
+    int(np.sum(mask2))
+)
+    m3 = param.map_log_volume_to_feasible_proxies(
+    param.compute_proxies_from_A(param.adaptive_ridge(alpha3[np.ix_(mask3, mask3)])["A_reg"])["log_volume"],
+    int(np.sum(mask3))
+)
 
-    def _feas_proxy(alpha, mask):
-        if not np.any(mask):
-            return 0.0, np.nan, np.nan, "no_survivors"
-        A_surv = alpha[np.ix_(mask, mask)]
-        reg = adaptive_ridge(A_surv)
-        if reg is None:
-            return 0.0, np.nan, np.nan, "ridge_failed"
-        proxies = compute_proxies_from_A(reg["A_reg"])
-        mapped = map_log_volume_to_feasible_proxies(proxies["log_volume"], int(np.sum(mask)))
-        return (float(mapped["feasible_volume_proxy"]),
-                float(mapped["log10_feasible_volume_proxy"]),
-                float(mapped["feasible_scale_per_dim"]),
-                "ok")
-
-    feas1_val, log10_feas1, feas1_scale, feas1_status = _feas_proxy(alpha1, mask1)
-    feas2_val, log10_feas2, feas2_scale, feas2_status = _feas_proxy(alpha2, mask2)
-    feas3_val, log10_feas3, feas3_scale, feas3_status = _feas_proxy(alpha3, mask3)
+    feas1_val, log10_feas1, feas1_raw = m1["log10_feasible_scale_per_dim"], m1["log10_feasible_volume_proxy"], m1["feasible_volume_proxy"]
+    feas2_val, log10_feas2, feas2_raw = m2["log10_feasible_scale_per_dim"], m2["log10_feasible_volume_proxy"], m2["feasible_volume_proxy"]
+    feas3_val, log10_feas3, feas3_raw = m3["log10_feasible_scale_per_dim"], m3["log10_feasible_volume_proxy"], m3["feasible_volume_proxy"]
     J3 = param.MiCRM_jac(N3, M3, u3, l3, MAINTENANCE_COST, rho3, omega3, lambda_vec3, sol3)
     ev3 = param.leading_eigenvalue(J3)
-
 
     species_data = []
 
     for i in range(N1):
-        species_data.append({
-            "Seed": seed,
-            "Community": 1,
-            "Species_ID": i + 1,
+        row = {
+            "Seed": seed, "Community": 1, "Species_ID": i + 1,
             "Species_CUE": species_CUE1[i],
-            "Community_CUE": community_CUE1,
-            "Abundance": C_final1[i],
-            "Total_Abundance": total_abundance1,
+            "actual_CUE": actual_CUE1[i],
+            "actual_community_CUE": actual_community_CUE1,
+            "Community_CUE": community_CUE1, "Community_CUE_surv": community_CUE1_surv,
+            "Abundance": C_final1[i], "Total_Abundance": total_abundance1,
             "Dominant_Community": dominant,
             "Competition": competition_comm1,
             "Species_Competition": competition_species1[i],
             "Species_Competition_Dot": competition_dot1[i],
-            "Facilitation": facilitation1[i],
-            "Depletion": depletion1,
-            "N_Survivors": survivors1_count,
-            "feasibility": feas1_val,
-            "log10_feasibility": log10_feas1,
-            "feasible_scale_per_dim": feas1_scale,
-            "feasibility_status": feas1_status,
-            "Leading_Eigenvalue": float(ev1)
-        })
+            "Facilitation": facilitation1[i], "Depletion": depletion1,
+            "UptakeVar": uptake_var1[i], "N_Survivors": survivors1_count,
+            "feasibility": feas1_val, "Leading_Eigenvalue": float(ev1),
+        }
+        species_data.append(row)
 
     for i in range(N2):
-        species_data.append({
-            "Seed": seed,
-            "Community": 2,
-            "Species_ID": i + 1,
+        row = {
+            "Seed": seed, "Community": 2, "Species_ID": i + 1,
             "Species_CUE": species_CUE2[i],
-            "Community_CUE": community_CUE2,
-            "Abundance": C_final2[i],
-            "Total_Abundance": total_abundance2,
+            "actual_CUE": actual_CUE2[i],
+            "actual_community_CUE": actual_community_CUE2,
+            "Community_CUE": community_CUE2, "Community_CUE_surv": community_CUE2_surv,
+            "Abundance": C_final2[i], "Total_Abundance": total_abundance2,
             "Dominant_Community": dominant,
             "Competition": competition_comm2,
             "Species_Competition": competition_species2[i],
             "Species_Competition_Dot": competition_dot2[i],
-            "Facilitation": facilitation2[i],
-            "Depletion": depletion2,
-            "UptakeVar": uptake_var2[i],
-            "N_Survivors": survivors2_count,
-            "feasibility": feas2_val,
-            "log10_feasibility": log10_feas2,
-            "feasible_scale_per_dim": feas2_scale,
-            "feasibility_status": feas2_status,
-            "Leading_Eigenvalue": float(ev2)
-        })
+            "Facilitation": facilitation2[i], "Depletion": depletion2,
+            "UptakeVar": uptake_var2[i], "N_Survivors": survivors2_count,
+            "feasibility": feas2_val, "Leading_Eigenvalue": float(ev2),
+        }
+        species_data.append(row)
 
     for i in range(N3):
-        species_data.append({
-            "Seed": seed,
-            "Community": 3,
-            "Species_ID": i + 1,
+        row = {
+            "Seed": seed, "Community": 3, "Species_ID": i + 1,
             "Species_CUE": species_CUE3[i],
-            "Community_CUE": community_CUE3,
-            "Abundance": C_final3[i],
-            "Total_Abundance": total_abundance3,
+            "actual_CUE": actual_CUE3[i],
+            "actual_community_CUE": actual_community_CUE3,
+            "Community_CUE": community_CUE3, "Community_CUE_surv": community_CUE3_surv,
+            "Abundance": C_final3[i], "Total_Abundance": total_abundance3,
             "Dominant_Community": dominant,
             "Competition": competition_comm3,
             "Species_Competition": competition_species3[i],
             "Species_Competition_Dot": competition_dot3[i],
-            "Facilitation": facilitation3[i],
-            "Depletion": depletion3,
-            "UptakeVar": uptake_var3[i],
-            "N_Survivors": survivors3_count,
-            "feasibility": feasible_volume_proxy,
-            "log10_feasibility": log10_feas3,
-            "feasible_scale_per_dim": feas3_scale,
-            "feasibility_status": feas3_status,
-            "Leading_Eigenvalue": float(ev3)
+            "Facilitation": facilitation3[i], "Depletion": depletion3,
+            "UptakeVar": uptake_var3[i], "N_Survivors": survivors3_count,
+            "feasibility": feas3_val, "Leading_Eigenvalue": float(ev3),
+        }
+        species_data.append(row)
+
+    # Collect time series data
+    timeseries_data = []
+    for idx, time_val in enumerate(t1):
+        timeseries_data.append({
+            "Seed": seed,
+            "Community": 1,
+            "Time": time_val,
+            "actual_community_CUE": cue_ts1[idx]
+        })
+    for idx, time_val in enumerate(t2):
+        timeseries_data.append({
+            "Seed": seed,
+            "Community": 2,
+            "Time": time_val,
+            "actual_community_CUE": cue_ts2[idx]
+        })
+    for idx, time_val in enumerate(t3):
+        timeseries_data.append({
+            "Seed": seed,
+            "Community": 3,
+            "Time": time_val,
+            "actual_community_CUE": cue_ts3[idx]
         })
 
-    return species_data
+    return species_data, timeseries_data
 
 
 def main():
@@ -271,17 +409,29 @@ def main():
     seeds = seed_generator.integers(0, 2**32 - 1, size=N_SIMULATIONS, dtype=np.uint32).tolist()
 
     with Pool(cpu_count()) as pool:
-        all_species_data_nested = pool.map(simulate, seeds)
+        all_results_nested = pool.map(simulate, seeds)
 
+    # Separate species data and timeseries data
     all_species_data = [
         row
-        for one_seed_result in all_species_data_nested
+        for one_seed_result in all_results_nested
         if one_seed_result
-        for row in one_seed_result
+        for row in one_seed_result[0]
+    ]
+    
+    all_timeseries_data = [
+        row
+        for one_seed_result in all_results_nested
+        if one_seed_result
+        for row in one_seed_result[1]
     ]
 
+    os.makedirs("data", exist_ok=True)
+    
+    # Save species data
     df = pd.DataFrame(all_species_data)
     df.to_csv(COAL_FILE, index=False)
+    print(f"Saved: {COAL_FILE}")
 
 
 if __name__ == "__main__":

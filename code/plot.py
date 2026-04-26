@@ -1,541 +1,976 @@
-import os
+# ====================================================================================================
+# ======================================== settings =========================================
+# ====================================================================================================
+
+import warnings
 import numpy as np
 import pandas as pd
-import matplotlib
-matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
+
 from scipy.spatial.distance import pdist, squareform
-from scipy.stats import linregress
-from pathlib import Path
-import warnings
-warnings.filterwarnings('ignore')
 
-# Set working directory to project root (parent of code folder)
-script_dir = Path(__file__).parent
-project_root = script_dir.parent
-os.chdir(project_root)
+warnings.filterwarnings("ignore")
 
-# Palette and theme setup
-pal_rgb = {"1": "#E74C3C", "2": "#2ECC71", "3": "#3498DB"}
-community_labels = {"1": "Parent 1", "2": "Parent 2", "3": "Coalesced"}
+SURVIVAL_THRESHOLD = 1e-5
 
-# Configure matplotlib style
-plt.rcParams['font.family'] = 'Times New Roman'
-plt.rcParams['font.size'] = 12
-plt.rcParams['mathtext.fontset'] = 'custom'
-plt.rcParams['mathtext.rm'] = 'Times New Roman'
-plt.rcParams['mathtext.it'] = 'Times New Roman:italic'
-plt.rcParams['mathtext.bf'] = 'Times New Roman:bold'
-plt.rcParams['axes.linewidth'] = 0.3
-plt.rcParams['xtick.major.width'] = 0.3
-plt.rcParams['ytick.major.width'] = 0.3
-plt.rcParams['xtick.major.size'] = 4
-plt.rcParams['ytick.major.size'] = 4
-
-def set_base_theme(ax):
-    """Apply base theme to matplotlib axes"""
-    ax.spines['top'].set_visible(True)
-    ax.spines['right'].set_visible(True)
-    ax.spines['left'].set_linewidth(0.3)
-    ax.spines['right'].set_linewidth(0.3)
-    ax.spines['top'].set_linewidth(0.3)
-    ax.spines['bottom'].set_linewidth(0.3)
-    ax.grid(False)
-    ax.tick_params(width=0.3, length=4)
-
-# Load data
-df = pd.read_csv("data/coal.csv")
-df['Status'] = df['Abundance'].apply(lambda x: "Extinction" if x < 1e-5 else "Survival")
-df_surv = df[df['Abundance'] > 1e-5].copy()
-
-df_surv['log10_Abundance'] = np.log10(df_surv['Abundance'])
-df['log10_Abundance'] = np.log10(df['Abundance'])
-
-# FIGURE 1: CUE vs Similarity with Dominance
-df_mut = df_surv.copy()
-df_mut['Global_Species_ID'] = df_mut.apply(
-    lambda x: x['Species_ID'] + 100 if x['Community'] == 2 else x['Species_ID'], axis=1
-)
-
-# Calculate Bray-Curtis dissimilarity
-bray_results = []
-
-for s in df_mut['Seed'].unique():
-    df_seed = df_mut[df_mut['Seed'] == s]
-    if not all(c in df_seed['Community'].values for c in [1, 2, 3]):
-        continue
-    
-    # Create community matrix
-    comm_mat = df_seed.pivot_table(
-        index='Community', 
-        columns='Global_Species_ID', 
-        values='Abundance', 
-        fill_value=0
-    )
-    
-    if len(comm_mat) != 3:
-        continue
-    
-    # Calculate Bray-Curtis dissimilarity
-    bc_matrix = squareform(pdist(comm_mat.values, metric='braycurtis'))
-    
-    # Map community indices
-    comm_idx = {comm: idx for idx, comm in enumerate(comm_mat.index)}
-    d31 = bc_matrix[comm_idx[3], comm_idx[1]]
-    d32 = bc_matrix[comm_idx[3], comm_idx[2]]
-    
-    cue1 = df_seed[df_seed['Community'] == 1]['Community_CUE'].iloc[0]
-    cue2 = df_seed[df_seed['Community'] == 2]['Community_CUE'].iloc[0]
-    
-    bray_results.append({
-        'Seed': s,
-        'Bray_3vs1': d31,
-        'Bray_3vs2': d32,
-        'CUE_1': cue1,
-        'CUE_2': cue2,
-        'Sim_3vs1': 1 - d31,
-        'Sim_3vs2': 1 - d32
-    })
-
-bray_df = pd.DataFrame(bray_results)
-
-# Get dominant community info
-df_comm = df[df['Community'].isin([1, 2])].groupby(['Seed', 'Community']).agg(
-    Community_CUE=('Community_CUE', 'first'),
-    Dominant_Community=('Dominant_Community', 'first')
-).reset_index()
-
-# Calculate differences
-df_diff = bray_df.copy()
-df_diff['CUE_Diff'] = df_diff['CUE_1'] - df_diff['CUE_2']
-df_diff['Sim_Diff'] = df_diff['Sim_3vs1'] - df_diff['Sim_3vs2']
-
-# Merge with dominant community
-dom_info = df_comm[df_comm['Community'] == 1][['Seed', 'Dominant_Community']]
-df_diff = df_diff.merge(dom_info, on='Seed', how='left')
-
-df_diff['DomGroup'] = df_diff['Dominant_Community'].map({
-    'Community 1': 'Parent 1',
-    'Community 2': 'Parent 2'
-})
-
-dom_colors = {
-    'Parent 1': pal_rgb['1'],
-    'Parent 2': pal_rgb['2'],
+pal_rgb = {
+    "1": "#D8A39A",
+    "2": "#A8C3A6",
+    "3": "#9FB7CC"
 }
 
-fig, ax = plt.subplots(figsize=(8.27, 4.72))
+theory_line_color = "#2F4858"
 
-for group, color in dom_colors.items():
-    df_g = df_diff[df_diff['DomGroup'] == group]
-    ax.scatter(df_g['CUE_Diff'], df_g['Sim_Diff'], 
-              color=color, alpha=0.7, s=25, label=group)
+community_labels = {
+    "1": "Community 1",
+    "2": "Community 2",
+    "3": "Coalesced Community"
+}
 
-ax.axhline(y=0, color='black', linestyle='--', linewidth=0.5)
-ax.set_xlabel('ΔCUE (Parent 1 - Parent 2)')
-ax.set_ylabel('ΔSimilarity (Parent 1 - Parent 2)')
-ax.set_ylim(-1.05, 1.05)
-ax.legend(title='Dominant', loc='best', frameon=True)
-set_base_theme(ax)
+xlabels = {
+    "1": "Species-level CUE of Community 1",
+    "2": "Species-level CUE of Community 2",
+    "3": "Species-level CUE of Coalesced Community"
+}
 
-plt.tight_layout()
-plt.savefig('results/dom_sim.pdf', dpi=600, bbox_inches='tight')
-print("Saved: results/dom_sim.pdf")
-plt.close()
+plt.rcParams.update({
+    "font.family": "serif",
+    "font.serif": ["Times New Roman", "Times", "Nimbus Roman", "Liberation Serif"],
+    "mathtext.fontset": "custom",
+    "mathtext.rm": "Times New Roman",
+    "mathtext.it": "Times New Roman:italic",
+    "mathtext.bf": "Times New Roman:bold",
+    "font.size": 14,
+    "axes.labelsize": 14,
+    "axes.titlesize": 14,
+    "xtick.labelsize": 14,
+    "ytick.labelsize": 14,
+    "legend.fontsize": 14,
+    "axes.linewidth": 0.4,
+    "xtick.major.width": 0.4,
+    "ytick.major.width": 0.4,
+    "xtick.major.size": 4.5,
+    "ytick.major.size": 4.5,
+    "legend.frameon": False,
+    "pdf.fonttype": 42,
+    "ps.fonttype": 42
+})
 
-# FIGURE 1B: CUE vs Dominance under Different Resource Overlap
-df_resource = pd.read_csv('data/coal_resource.csv')
-df_resource['Overlap'] = df_resource['Overlap'].astype(str)
-
-# Compute differences
-df_diff_resource = df_resource.copy()
-df_diff_resource['CUE_diff'] = df_diff_resource['CUE1'] - df_diff_resource['CUE2']
-df_diff_resource['Sim_diff'] = df_diff_resource['Similarity_3vs1'] - df_diff_resource['Similarity_3vs2']
-
-# Create CUE bins
-n_bins = 5
-df_diff_resource['CUE_bin'] = pd.cut(df_diff_resource['CUE_diff'], bins=n_bins)
-df_diff_resource['CUE_mid'] = df_diff_resource['CUE_bin'].apply(lambda x: x.mid)
-
-overlap_colors = {"0.25": "#E74C3C", "0.5": "#F39C12", "0.75": "#3498DB"}
-
-fig, ax = plt.subplots(figsize=(8.27, 4.72))
-
-# Prepare data for boxplot
-overlap_vals = sorted(df_diff_resource['Overlap'].unique())
-bin_vals = sorted(df_diff_resource['CUE_bin'].unique(), key=lambda x: x.mid)
-
-positions = []
-data_list = []
-colors_list = []
-
-for i, bin_val in enumerate(bin_vals):
-    for j, overlap in enumerate(overlap_vals):
-        data = df_diff_resource[
-            (df_diff_resource['CUE_bin'] == bin_val) & 
-            (df_diff_resource['Overlap'] == overlap)
-        ]['Sim_diff']
-        
-        if len(data) > 0:
-            pos = i * (len(overlap_vals) + 0.5) + j
-            positions.append(pos)
-            data_list.append(data.values)
-            colors_list.append(overlap_colors[overlap])
-
-# Create boxplot
-bp = ax.boxplot(data_list, positions=positions, widths=0.6, patch_artist=True,
-                boxprops=dict(alpha=0.7),
-                medianprops=dict(color='black', linewidth=1),
-                whiskerprops=dict(linewidth=0.8),
-                capprops=dict(linewidth=0.8),
-                flierprops=dict(marker='o', markersize=3, alpha=0.5))
-
-# Color the boxes
-for patch, color in zip(bp['boxes'], colors_list):
-    patch.set_facecolor(color)
-
-ax.axhline(y=0, color='black', linestyle='--', linewidth=0.5)
-ax.set_ylim(-0.5, 0.5)
-ax.set_ylabel('ΔSimilarity (Parent 1 - Parent 2)')
-ax.set_xlabel('ΔCUE (Parent 1 - Parent 2)')
-
-# Set x-axis labels
-bin_centers = [i * (len(overlap_vals) + 0.5) + 1 for i in range(len(bin_vals))]
-ax.set_xticks(bin_centers)
-ax.set_xticklabels([f"{b.left:.2f} to {b.right:.2f}" for b in bin_vals], 
-                    rotation=45, ha='right', fontsize=8)
-
-# Create legend
-from matplotlib.patches import Patch
-legend_elements = [Patch(facecolor=overlap_colors[o], alpha=0.7, label=o) 
-                   for o in overlap_vals]
-ax.legend(handles=legend_elements, title='Resource Overlap', loc='best')
-
-set_base_theme(ax)
-plt.tight_layout()
-plt.savefig('results/cue_dominance_overlap.pdf', dpi=600, bbox_inches='tight')
-print("Saved: results/cue_dominance_overlap.pdf")
-plt.close()
-
-
-# Figurec 2 Species CUE vs log10(Abundance) with Theoretical Curve (Dual Axis)
-# Load data
-df_coal = pd.read_csv("data/coal.csv")
-df_coal['Community'] = df_coal['Community'].astype(str)
-df_coal_surv = df_coal[df_coal['Abundance'] > 1e-5].copy()
-df_coal_surv['log10_Abundance'] = np.log10(df_coal_surv['Abundance'])
-
-# Load theory parameters
-theory_params_df = pd.read_csv("data/coal_theory_curve_parameters.csv")
-theory_params_df['Community'] = theory_params_df['Community'].astype(str)
-
-# Define theory function
-def cue_abundance_theory(eps, eps_c, H, Cmax):
-    eps = np.asarray(eps, dtype=float)
-    if not np.isfinite(eps_c) or not np.isfinite(H) or not np.isfinite(Cmax):
-        return np.full_like(eps, np.nan, dtype=float)
-    H = max(float(H), 1e-12)
-    Cmax = max(float(Cmax), 1e-12)
-    delta = np.maximum(eps - eps_c, 0.0)
-    return Cmax * (1.0 - np.exp(-delta / H))
-
-# Get y-axis limits
-y_min = np.nanmin(df_coal_surv["log10_Abundance"])
-y_max = np.nanmax(df_coal_surv["log10_Abundance"])
-
-# Create figure
-fig = plt.figure(figsize=(8, 12))
-gs = fig.add_gridspec(3, 2, width_ratios=[1.2, 3], hspace=0.35, wspace=0.05)
-
-for i, comm in enumerate(["1", "2", "3"]):
-    # Filter data for this community
-    dat_surv = df_coal_surv[df_coal_surv["Community"] == comm].copy()
-    dat_surv = dat_surv[np.isfinite(dat_surv["Species_CUE"]) & np.isfinite(dat_surv["log10_Abundance"])]
-
-    dat_full = df_coal[df_coal["Community"] == comm].copy()
-    dat_full = dat_full[np.isfinite(dat_full["Species_CUE"]) & np.isfinite(dat_full["Abundance"])]
-
-    # Create subplots
-    ax_hist = fig.add_subplot(gs[i, 0])
-    ax_main = fig.add_subplot(gs[i, 1])
-
-    # Scatter plot
-    ax_main.scatter(
-        dat_surv["Species_CUE"],
-        dat_surv["log10_Abundance"],
-        s=18,
-        alpha=0.3,
-        color=pal_rgb[comm],
-        edgecolors="none"
-    )
-
-    ax_main.set_ylim(y_min, y_max)
-    ax_main.set_xlabel("Species-level CUE")
-    ax_main.set_ylabel(r"$\log_{10}(\mathrm{Abundance})$")
-    ax_main.set_title(community_labels[comm], loc="right")
-    set_base_theme(ax_main)
-
-    # Create twin axis for theory curve
-    ax_theory = ax_main.twinx()
-    ax_theory.set_zorder(ax_main.get_zorder() + 1)
-    ax_theory.patch.set_alpha(0.0)
-    ax_theory.grid(False)
-
-    ax_theory.set_ylabel("Theoretical abundance", color="black")
-    ax_theory.tick_params(axis="y", colors="black", width=0.3)
-
-    for spine in ax_theory.spines.values():
+def style_ax(ax, grid=False):
+    ax.set_facecolor("white")
+    for spine in ax.spines.values():
         spine.set_visible(True)
         spine.set_color("black")
-        spine.set_linewidth(0.3)
+        spine.set_linewidth(0.4)
 
-    # Get theory parameters for this community
-    params_row = theory_params_df[theory_params_df["Community"] == comm]
-    
-    if len(params_row) > 0 and np.isfinite(params_row["eps_c"].iloc[0]):
-        eps_c = params_row["eps_c"].iloc[0]
-        H = params_row["H"].iloc[0]
-        Cmax = params_row["Cmax"].iloc[0]
+    ax.tick_params(axis="both", width=0.4, colors="black", pad=4)
 
-        # Generate theory curve
-        x_grid = np.linspace(dat_full["Species_CUE"].min(), dat_full["Species_CUE"].max(), 800)
-        c_theory = cue_abundance_theory(x_grid, eps_c, H, Cmax)
-
-        valid = np.isfinite(c_theory) & (c_theory > 1e-5)
-
-        if np.any(valid):
-            ax_theory.set_yscale("log")
-            ax_theory.set_ylim(
-                max(np.nanmin(c_theory[valid]), 1e-5),
-                np.nanmax(c_theory[valid]) * 1.05
-            )
-
-            ax_theory.plot(
-                x_grid[valid],
-                c_theory[valid],
-                color="black",
-                linewidth=2.0,
-                zorder=10
-            )
-        else:
-            ax_theory.set_yscale("log")
-            ax_theory.set_ylim(1e-5, 1.0)
+    if grid:
+        ax.grid(True, which="major", color="#E5E5E5", linewidth=0.35)
+        ax.grid(True, which="minor", color="#F2F2F2", linewidth=0.2)
     else:
-        ax_theory.set_yscale("log")
-        ax_theory.set_ylim(1e-5, 1.0)
+        ax.grid(False)
 
-    # Histogram
+def first_unique(series):
+    vals = pd.Series(series).dropna().unique()
+    return vals[0] if len(vals) > 0 else np.nan
+
+df = pd.read_csv("data/coal.csv")
+df = df.rename(columns={"Species_Competition_Dot": "Species_Competition2"})
+df["Community"] = df["Community"].astype(str)
+df["Species_ID"] = pd.to_numeric(df["Species_ID"], errors="coerce")
+df["Species_CUE"] = pd.to_numeric(df["Species_CUE"], errors="coerce")
+df["Abundance"] = pd.to_numeric(df["Abundance"], errors="coerce")
+
+df_surv = df[df["Abundance"] > SURVIVAL_THRESHOLD].copy()
+df_surv["log10_Abundance"] = np.log10(df_surv["Abundance"])
+
+params_df = pd.read_csv("data/cue_abundance_theory_params.csv")
+params_df["Community"] = params_df["Community"].astype(str)
+
+df_resource = pd.read_csv("data/coal_resource.csv")
+df_resource = df_resource.rename(columns={
+    "Similarity_3vs1": "Sim_3vs1",
+    "Similarity_3vs2": "Sim_3vs2"
+})
+df_resource["Overlap"] = df_resource["Overlap"].astype(str)
+
+df_rare = pd.read_csv("data/rare.csv")
+df_rare = df_rare.rename(columns={
+    "Abundance": "C_final",
+    "Species_CUE": "CUE"
+})
+
+
+
+
+# ====================================================================================================
+# ================================ Species CUE vs Abundance + Theory =============================
+# ====================================================================================================
+
+y_min = np.nanmin(df_surv["log10_Abundance"])
+y_max = np.nanmax(df_surv["log10_Abundance"])
+
+fig = plt.figure(figsize=(8.6, 12))
+gs = fig.add_gridspec(
+    3, 2,
+    width_ratios=[1.45, 3.55],
+    hspace=0.38,
+    wspace=0.06
+)
+
+for i, comm in enumerate(["1", "2", "3"]):
+    dat_surv = df_surv[df_surv["Community"] == comm].copy()
+    dat_surv = dat_surv[
+        np.isfinite(dat_surv["Species_CUE"]) &
+        np.isfinite(dat_surv["log10_Abundance"])
+    ]
+
+    dat_full = df[df["Community"] == comm].copy()
+    dat_full = dat_full[
+        np.isfinite(dat_full["Species_CUE"]) &
+        np.isfinite(dat_full["Abundance"])
+    ]
+
+    row = params_df[params_df["Community"] == comm].iloc[0]
+    eps_c = pd.to_numeric(row["eps_c"], errors="coerce")
+    H = pd.to_numeric(row["H"], errors="coerce")
+    Cmax = pd.to_numeric(row["Cmax"], errors="coerce")
+
+    ax_hist = fig.add_subplot(gs[i, 0])
+    ax_main = fig.add_subplot(gs[i, 1], sharey=ax_hist)
+
     ax_hist.hist(
         dat_surv["log10_Abundance"].dropna(),
         bins=50,
         orientation="horizontal",
         color=pal_rgb[comm],
-        alpha=0.3,
-        edgecolor=pal_rgb[comm]
+        alpha=0.45,
+        edgecolor="black",
+        linewidth=0.3
     )
     ax_hist.set_ylim(y_min, y_max)
     ax_hist.invert_xaxis()
-    ax_hist.set_xlabel("Frequency")
-    ax_hist.set_ylabel("")
-    ax_hist.set_yticklabels([])
-    ax_hist.tick_params(axis="y", length=0)
-    set_base_theme(ax_hist)
+    ax_hist.set_xlabel("Density")
+    ax_hist.set_ylabel(r"Abundance ($\log_{10}$ scale)", labelpad=10)
+    style_ax(ax_hist, grid=False)
+
+    ax_main.scatter(
+        dat_surv["Species_CUE"],
+        dat_surv["log10_Abundance"],
+        s=42,
+        alpha=0.55,
+        facecolors=pal_rgb[comm],
+        edgecolors="black",
+        linewidths=0.5,
+        zorder=3
+    )
+    ax_main.set_ylim(y_min, y_max)
+    ax_main.set_xlabel(xlabels[comm])
+    ax_main.set_ylabel("")
+    ax_main.tick_params(axis="y", left=False, labelleft=False)
+    style_ax(ax_main, grid=False)
+
+    ax_theory = ax_main.twinx()
+    ax_theory.set_zorder(ax_main.get_zorder() + 1)
+    ax_theory.patch.set_alpha(0.0)
+    ax_theory.set_ylabel("Predicted abundance", color=theory_line_color, labelpad=12)
+    ax_theory.tick_params(axis="y", colors=theory_line_color, width=0.4, pad=6)
+    ax_theory.grid(False)
+
+    for spine in ax_theory.spines.values():
+        spine.set_visible(True)
+        spine.set_color("black")
+        spine.set_linewidth(0.4)
+
+    x_grid = np.linspace(dat_full["Species_CUE"].min(), dat_full["Species_CUE"].max(), 800)
+    delta = np.maximum(x_grid - eps_c, 0.0)
+    c_theory = Cmax * (1.0 - np.exp(-delta / H))
+    valid = c_theory > SURVIVAL_THRESHOLD
+
+    ax_theory.set_yscale("log")
+    if valid.sum() > 0:
+        ax_theory.set_ylim(np.min(c_theory[valid]), np.max(c_theory[valid]) * 1.05)
+        ax_theory.plot(
+            x_grid[valid],
+            c_theory[valid],
+            color=theory_line_color,
+            linewidth=2.8,
+            zorder=10
+        )
+    else:
+        ax_theory.set_ylim(SURVIVAL_THRESHOLD, 1.0)
 
 plt.tight_layout()
-plt.savefig(
-    "data/coal_species_cue_vs_logabundance_with_theory_dual_axis.png",
-    dpi=300,
-    bbox_inches="tight"
+plt.show()
+
+
+
+
+# ====================================================================================================
+# ========================= Competition vs Community-level CUE =================================
+# ====================================================================================================
+
+
+from matplotlib.ticker import MaxNLocator
+
+df_comm_agg = (
+    df_surv
+    .groupby(["Seed", "Community", "Competition", "Community_CUE_surv", "Facilitation"], as_index=False)
+    .agg(Species_CUE_Var=("Species_CUE", lambda x: np.nanvar(x, ddof=1)))
 )
-print("Saved: data/coal_species_cue_vs_logabundance_with_theory_dual_axis.png")
-plt.close()
-# FIGURE 3: Rare Species Invasion
-df_rare = pd.read_csv("data/rare.csv")
-df_rare['survival'] = df_rare['Abundance'].apply(lambda x: "Survived" if x > 1e-5 else "Extinct")
-df_rare_filt = df_rare[df_rare['DilutionRate'].isin([0.01, 0.1])].copy()
 
-# Create CUE bins
+fig, axes = plt.subplots(1, 3, figsize=(12, 4.2), sharey=True)
+
+for i, (ax, comm) in enumerate(zip(axes, ["1", "2", "3"])):
+    dat = df_comm_agg[df_comm_agg["Community"] == comm]
+
+    ax.scatter(
+        dat["Competition"],
+        dat["Community_CUE_surv"],
+        s=44,
+        alpha=0.6,
+        facecolors=pal_rgb[comm],
+        edgecolors="black",
+        linewidths=0.5,
+        zorder=3
+    )
+
+    ax.set_xlabel("Community uptake similarity")
+    ax.set_title(community_labels[comm], pad=8)
+    ax.set_ylim(0.53, 0.565)
+
+    # 每个 x 轴只保留 4 个主刻度
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+
+    # 只有最左侧显示 y 轴刻度和标签
+    if i == 0:
+        ax.set_ylabel("Community-level CUE")
+    else:
+        ax.tick_params(axis="y", left=False, labelleft=False)
+
+    style_ax(ax, grid=False)
+
+plt.tight_layout()
+plt.show()
+
+
+
+# ====================================================================================================
+# =========================== Species competition vs Species CUE ================================
+# ====================================================================================================
+
+from matplotlib.ticker import MaxNLocator, ScalarFormatter
+
+fig, axes = plt.subplots(1, 3, figsize=(12, 4.2), sharey=True)
+
+for i, (ax, comm) in enumerate(zip(axes, ["1", "2", "3"])):
+    dat = df_surv[df_surv["Community"] == comm]
+
+    ax.scatter(
+        dat["Species_Competition2"],
+        dat["Species_CUE"],
+        s=40,
+        alpha=0.55,
+        facecolors=pal_rgb[comm],
+        edgecolors="black",
+        linewidths=0.5,
+        zorder=3
+    )
+
+    ax.set_xlabel("Species uptake similarity")
+    ax.set_title(community_labels[comm], pad=8)
+    ax.set_ylim(0.50, 0.59)
+
+    # x轴只保留4个主刻度
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+
+    # x轴使用科学计数法，并在轴旁边显示类似 1e-3 的标记
+    formatter = ScalarFormatter(useMathText=True)
+    formatter.set_scientific(True)
+    formatter.set_powerlimits((0, 0))
+    ax.xaxis.set_major_formatter(formatter)
+
+    # 调整偏移文字大小，也就是右下角那个 1e-3
+    ax.xaxis.get_offset_text().set_fontsize(12)
+
+    if i == 0:
+        ax.set_ylabel("Species-level CUE")
+    else:
+        ax.tick_params(axis="y", left=False, labelleft=False)
+
+    style_ax(ax, grid=False)
+
+plt.tight_layout()
+plt.show()
+
+
+
+
+# ====================================================================================================
+# ========================== Facilitation vs Community-level CUE =================================
+# ====================================================================================================
+
+from matplotlib.ticker import MaxNLocator, ScalarFormatter
+
+df_comm_fac = (
+    df_surv
+    .groupby(["Seed", "Community"], as_index=False)
+    .agg(
+        Community_CUE_surv=("Community_CUE_surv", first_unique),
+        Facilitation=("Facilitation", "mean")
+    )
+)
+
+fig, axes = plt.subplots(1, 3, figsize=(12, 4.2), sharey=True)
+
+for i, (ax, comm) in enumerate(zip(axes, ["1", "2", "3"])):
+    dat = df_comm_fac[df_comm_fac["Community"] == comm]
+
+    ax.scatter(
+        dat["Facilitation"],
+        dat["Community_CUE_surv"],
+        s=44,
+        alpha=0.6,
+        facecolors=pal_rgb[comm],
+        edgecolors="black",
+        linewidths=0.5,
+        zorder=3
+    )
+
+    ax.set_xlabel("Facilitation")
+    ax.set_title(community_labels[comm], pad=8)
+    ax.set_ylim(0.53, 0.565)
+
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+
+    formatter = ScalarFormatter(useMathText=True)
+    formatter.set_scientific(True)
+    formatter.set_powerlimits((0, 0))
+    ax.xaxis.set_major_formatter(formatter)
+    ax.xaxis.get_offset_text().set_fontsize(12)
+
+    if i == 0:
+        ax.set_ylabel("Community-level CUE")
+    else:
+        ax.tick_params(axis="y", left=False, labelleft=False)
+
+    style_ax(ax, grid=False)
+
+plt.tight_layout()
+plt.show()
+
+
+
+
+# ====================================================================================================
+# ====================== ΔCUE vs ΔSimilarity with Dominance ====================================
+# ====================================================================================================
+
+df_mut = df_surv.copy()
+df_mut["Global_Species_ID"] = np.where(
+    df_mut["Community"] == "2",
+    df_mut["Species_ID"] + 100,
+    df_mut["Species_ID"]
+)
+
+bray_rows = []
+
+for s in sorted(df_mut["Seed"].unique()):
+    df_seed = df_mut[df_mut["Seed"] == s].copy()
+
+    comm_mat = (
+        df_seed[["Community", "Global_Species_ID", "Abundance"]]
+        .pivot_table(
+            index="Community",
+            columns="Global_Species_ID",
+            values="Abundance",
+            aggfunc="sum",
+            fill_value=0
+        )
+        .reindex(["1", "2", "3"])
+        .fillna(0)
+    )
+
+    bc = squareform(pdist(comm_mat.values, metric="braycurtis"))
+
+    d31 = bc[2, 0]
+    d32 = bc[2, 1]
+
+    cue1 = first_unique(df_seed.loc[df_seed["Community"] == "1", "Community_CUE_surv"])
+    cue2 = first_unique(df_seed.loc[df_seed["Community"] == "2", "Community_CUE_surv"])
+
+    bray_rows.append({
+        "Seed": s,
+        "Bray_3vs1": d31,
+        "Bray_3vs2": d32,
+        "CUE_1": cue1,
+        "CUE_2": cue2,
+        "Sim_3vs1": 1 - d31,
+        "Sim_3vs2": 1 - d32
+    })
+
+bray_results = pd.DataFrame(bray_rows)
+
+df_comm = (
+    df[df["Community"].isin(["1", "2"])]
+    .groupby(["Seed", "Community"], as_index=False)
+    .agg(
+        Community_CUE_surv=("Community_CUE_surv", first_unique),
+        Dominant_Community=("Dominant_Community", first_unique)
+    )
+)
+
+df_diff = bray_results.copy()
+df_diff["CUE_Diff"] = df_diff["CUE_1"] - df_diff["CUE_2"]
+df_diff["Sim_Diff"] = df_diff["Sim_3vs1"] - df_diff["Sim_3vs2"]
+
+dom_seed = (
+    df_comm[df_comm["Community"] == "1"][["Seed", "Dominant_Community"]]
+    .drop_duplicates()
+    .copy()
+)
+
+df_diff = df_diff.merge(dom_seed, on="Seed", how="left")
+df_diff["DomGroup"] = np.select(
+    [
+        df_diff["Dominant_Community"] == "Community 1",
+        df_diff["Dominant_Community"] == "Community 2"
+    ],
+    [
+        "Community 1",
+        "Community 2"
+    ],
+    default="Neither"
+)
+
+dom_colors = {
+    "Community 1": pal_rgb["1"],
+    "Community 2": pal_rgb["2"]
+}
+
+# Prepare data for Resource Overlap panel
+df_diff_resource = df_resource.copy()
+df_diff_resource["CUE_diff"] = df_diff_resource["CUE1"] - df_diff_resource["CUE2"]
+df_diff_resource["Sim_diff"] = df_diff_resource["Sim_3vs1"] - df_diff_resource["Sim_3vs2"]
+
+df_diff_resource = df_diff_resource[
+    (df_diff_resource["CUE_diff"] >= -0.02) & 
+    (df_diff_resource["CUE_diff"] <= 0.02)
+]
+
+n_bins = 5
+df_diff_resource["CUE_bin"] = pd.qcut(
+    df_diff_resource["CUE_diff"],
+    q=n_bins,
+    duplicates="drop"
+)
+
+interval_order = sorted(
+    df_diff_resource["CUE_bin"].dropna().unique(),
+    key=lambda x: x.mid
+)
+
+df_diff_resource["CUE_bin"] = pd.Categorical(
+    df_diff_resource["CUE_bin"],
+    categories=interval_order,
+    ordered=True
+)
+
+overlap_colors = {
+    "0.25": "#D8A39A",
+    "0.5": "#D9C27A",
+    "0.75": "#9FB7CC"
+}
+
+# Create combined figure with two panels
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+
+# ========== Left Panel: ΔCUE vs ΔSimilarity with Dominance ==========
+for grp in ["Community 1", "Community 2"]:
+    dat = df_diff[df_diff["DomGroup"] == grp]
+
+    ax1.scatter(
+        dat["CUE_Diff"],
+        dat["Sim_Diff"],
+        s=100,
+        alpha=0.65,
+        facecolors=dom_colors[grp],
+        edgecolors="black",
+        linewidths=0.5,
+        label=grp,
+        zorder=3
+    )
+
+ax1.axhline(0, linestyle="--", color="black", linewidth=0.7)
+ax1.set_xlim(-0.02, 0.02)
+ax1.set_xlabel(r"Community CUE difference")
+ax1.set_ylabel(r"Similarity difference")
+ax1.legend(
+    title="Dominant community",
+    loc="lower right",
+    frameon=True,
+    edgecolor="black",
+    framealpha=0.6
+)
+style_ax(ax1, grid=False)
+
+# ========== Right Panel: ΔCUE vs ΔSimilarity under Resource Overlap ==========
+sns.boxplot(
+    data=df_diff_resource,
+    x="CUE_bin",
+    y="Sim_diff",
+    hue="Overlap",
+    palette=overlap_colors,
+    dodge=True,
+    width=0.72,
+    fliersize=1.8,
+    linewidth=0.7,
+    saturation=1,
+    ax=ax2,
+    boxprops=dict(edgecolor="black"),
+    medianprops=dict(color="black", linewidth=0.9),
+    whiskerprops=dict(color="black", linewidth=0.7),
+    capprops=dict(color="black", linewidth=0.7),
+    flierprops=dict(
+        marker="o",
+        markersize=2.2,
+        markerfacecolor="white",
+        markeredgecolor="black",
+        alpha=0.8
+    )
+)
+
+ax2.axhline(0, linestyle="--", color="black", linewidth=0.7)
+
+# Dotted lines connecting medians for each overlap group
+total_width = 0.72
+group_width = total_width / len(overlap_colors)
+offsets = np.linspace(-(total_width - group_width) / 2, (total_width - group_width) / 2, len(overlap_colors))
+
+for g_idx, (overlap_key, color) in enumerate(overlap_colors.items()):
+    medians = []
+    x_positions = []
+    sub = df_diff_resource[df_diff_resource["Overlap"] == overlap_key]
+    for b_idx, cat in enumerate(interval_order):
+        vals = sub.loc[sub["CUE_bin"] == cat, "Sim_diff"].dropna()
+        if len(vals) > 0:
+            medians.append(vals.median())
+            x_positions.append(b_idx + offsets[g_idx])
+    if len(x_positions) > 1:
+        ax2.plot(x_positions, medians, linestyle=":", color=color, linewidth=1.2,
+                 marker="o", markersize=3, markeredgecolor="black", markeredgewidth=0.5)
+
+ax2.set_ylim(-0.4, 0.4)
+ax2.set_xlabel(r"Community CUE difference")
+ax2.set_ylabel(r"Similarity difference")
+lg = ax2.legend(
+    title="Resource overlap",
+    loc="upper left",
+    frameon=True,
+    edgecolor="black",
+    facecolor="white",
+    framealpha=0.6
+)
+lg.get_texts()[0].set_text("25%")
+lg.get_texts()[1].set_text("50%")
+lg.get_texts()[2].set_text("75%")
+
+ax2.set_xticklabels(
+    [f"({iv.left:.3f}, {iv.right:.3f}]" for iv in interval_order],
+    rotation=40,
+    ha="right"
+)
+style_ax(ax2, grid=False)
+
+plt.tight_layout()
+plt.show()
+
+
+
+
+# ====================================================================================================
+# ============================= Community-level CUE vs Depletion ================================
+# ====================================================================================================
+
+df_depletion = (
+    df.groupby(["Seed", "Community"], as_index=False)
+    .agg(
+        Community_CUE_surv=("Community_CUE_surv", first_unique),
+        Niche_Overlap=("Competition", first_unique),
+        Depletion=("Depletion", first_unique)
+    )
+)
+
+marker_map = {"1": "o", "2": "^", "3": "s"}
+
+fig, axes = plt.subplots(
+    1, 2,
+    figsize=(10.2, 4.8),
+    gridspec_kw={"width_ratios": [2, 1]}
+)
+
+ax1, ax2 = axes
+
+for comm in ["1", "2", "3"]:
+    dat = df_depletion[df_depletion["Community"] == comm]
+
+    ax1.scatter(
+        dat["Community_CUE_surv"],
+        dat["Depletion"],
+        s=48,
+        alpha=0.65,
+        marker=marker_map[comm],
+        facecolors=pal_rgb[comm],
+        edgecolors="black",
+        linewidths=0.5,
+        label=community_labels[comm],
+        zorder=3
+    )
+
+ax1.set_xlabel("Community-level CUE")
+ax1.set_ylabel("Total residual resource")
+ax1.legend(
+    loc="upper right",
+    frameon=True,
+    edgecolor="black",
+    facecolor="white",
+    framealpha=0.6
+)
+style_ax(ax1, grid=False)
+
+sns.boxplot(
+    data=df_depletion,
+    x="Community",
+    y="Community_CUE_surv",
+    palette=pal_rgb,
+    width=0.62,
+    fliersize=1.8,
+    linewidth=0.7,
+    saturation=1,
+    ax=ax2,
+    boxprops=dict(edgecolor="black"),
+    medianprops=dict(color="black", linewidth=0.9),
+    whiskerprops=dict(color="black", linewidth=0.7),
+    capprops=dict(color="black", linewidth=0.7),
+    flierprops=dict(
+        marker="o",
+        markersize=2.2,
+        markerfacecolor="white",
+        markeredgecolor="black",
+        alpha=0.8
+    )
+)
+
+ax2.set_xticklabels(["Community 1", "Community 2", "Coalescence"], rotation=15)
+ax2.set_xlabel("")
+ax2.set_ylabel("Community-level CUE")
+style_ax(ax2, grid=False)
+
+plt.tight_layout()
+plt.show()
+
+
+
+
+# ====================================================================================================
+# ============================== Rare Species Invasion ==========================================
+# ====================================================================================================
+
+df_rare["survival"] = np.where(df_rare["C_final"] > SURVIVAL_THRESHOLD, "Survived", "Extinct")
+df_rare_filt = df_rare[df_rare["DilutionRate"].isin([0.01, 0.1])].copy()
+
 n_bins = 20
-df_rare_filt['CUE_bin'] = pd.cut(df_rare_filt['Species_CUE'], bins=n_bins)
-df_rare_filt['CUE_mid'] = df_rare_filt['CUE_bin'].apply(lambda x: x.mid)
+df_rare_filt["CUE_bin"] = pd.cut(df_rare_filt["CUE"], bins=n_bins)
 
-# Count survival/extinction
-df_rare_bar = df_rare_filt.groupby(['DilutionRate', 'CUE_bin', 'survival']).size().reset_index(name='count')
-df_rare_bar['CUE_mid'] = df_rare_bar['CUE_bin'].apply(lambda x: x.mid)
+df_rare_bar = (
+    df_rare_filt
+    .groupby(["DilutionRate", "CUE_bin", "survival"], observed=False)
+    .size()
+    .reset_index(name="count")
+)
 
-dilution_labels = {0.01: "Rarity Level = 0.01", 0.1: "Rarity Level = 0.1"}
+interval_order = sorted(
+    df_rare_bar["CUE_bin"].dropna().unique(),
+    key=lambda x: x.mid
+)
 
-fig, axes = plt.subplots(2, 1, figsize=(8.27, 5.51), sharex=True)
+dilution_labels = {
+    0.01: "Rarity level = 0.01",
+    0.1: "Rarity level = 0.1"
+}
 
-for idx, dilution in enumerate([0.01, 0.1]):
-    ax = axes[idx]
-    df_d = df_rare_bar[df_rare_bar['DilutionRate'] == dilution]
-    
-    # Sort by CUE_mid
-    bins_sorted = sorted(df_d['CUE_bin'].unique(), key=lambda x: x.mid)
-    
-    survived = []
-    extinct = []
-    
-    for bin_val in bins_sorted:
-        df_bin = df_d[df_d['CUE_bin'] == bin_val]
-        surv = df_bin[df_bin['survival'] == 'Survived']['count'].sum()
-        ext = df_bin[df_bin['survival'] == 'Extinct']['count'].sum()
-        survived.append(surv)
-        extinct.append(ext)
-    
-    x_pos = np.arange(len(bins_sorted))
-    ax.bar(x_pos, extinct, color='#E74C3C', alpha=0.8, label='Extinct')
-    ax.bar(x_pos, survived, bottom=extinct, color='#2ECC71', alpha=0.8, label='Survived')
-    
-    ax.set_ylabel('Species Count')
-    ax.text(0.02, 0.95, dilution_labels[dilution], 
-            transform=ax.transAxes, va='top', fontsize=12)
-    
-    if idx == 0:
-        ax.legend(title='Outcome', loc='upper right')
-    
-    if idx == 1:
-        ax.set_xlabel('Species-level CUE')
-        ax.set_xticks(x_pos)
-        ax.set_xticklabels([f"{b.left:.2f}" for b in bins_sorted], 
-                          rotation=45, ha='right', fontsize=8)
-    
-    set_base_theme(ax)
+color_map = {
+    "Survived": "#A8C3A6",
+    "Extinct": "#D8A39A"
+}
 
-plt.tight_layout()
-plt.savefig('results/rare_survival.pdf', dpi=600, bbox_inches='tight')
-print("Saved: results/rare_survival.pdf")
-plt.close()
+y_low_max = 550
+y_high_min = 2200
+y_high_max = 2600
 
-# FIGURE 4: Facilitation vs Community CUE
-df_comm_fac = df_surv.groupby(['Seed', 'Community']).agg(
-    Community_CUE=('Community_CUE', 'first'),
-    Facilitation=('Facilitation', 'mean')
-).reset_index()
+fig = plt.figure(figsize=(12, 5.8))
+gs = fig.add_gridspec(
+    2, 2,
+    height_ratios=[1, 4],
+    wspace=0.08,
+    hspace=0.03
+)
 
-fig, axes = plt.subplots(1, 3, figsize=(8.27, 4.72), sharey=True)
+ax_top_left = fig.add_subplot(gs[0, 0])
+ax_top_right = fig.add_subplot(gs[0, 1], sharey=ax_top_left)
 
-for idx, comm in enumerate([1, 2, 3]):
-    df_i = df_comm_fac[df_comm_fac['Community'] == comm]
-    ax = axes[idx]
-    ax.scatter(df_i['Facilitation'], df_i['Community_CUE'],
-              color=pal_rgb[str(comm)], alpha=0.7, s=15)
-    ax.set_title(community_labels[str(comm)], fontsize=12)
-    
-    # Format x-axis
-    x_vals = ax.get_xticks()
-    ax.set_xticklabels([f'{x*1e3:.2f}' for x in x_vals], fontsize=10)
-    ax.set_xlabel('Facilitation (×10$^{-3}$)')
-    
-    if idx == 0:
-        ax.set_ylabel('Community CUE')
-    
-    ax.grid(True, alpha=0.2, linewidth=0.3)
-    set_base_theme(ax)
+ax_bot_left = fig.add_subplot(gs[1, 0], sharex=ax_top_left)
+ax_bot_right = fig.add_subplot(gs[1, 1], sharex=ax_top_right, sharey=ax_bot_left)
 
-plt.tight_layout()
-plt.savefig('results/Facilitation_vs_communityCUE.pdf', dpi=600, bbox_inches='tight')
-print("Saved: results/Facilitation_vs_communityCUE.pdf")
-plt.close()
+top_axes = [ax_top_left, ax_top_right]
+bot_axes = [ax_bot_left, ax_bot_right]
 
-# FIGURE 5: CUE vs Depletion
-df_depletion = df.groupby(['Seed', 'Community']).agg(
-    Community_CUE=('Community_CUE', 'first'),
-    Niche_Overlap=('Competition', 'first'),
-    Depletion=('Depletion', 'first')
-).reset_index()
+for i, dil in enumerate([0.01, 0.1]):
+    ax_top = top_axes[i]
+    ax_bot = bot_axes[i]
 
-fig = plt.figure(figsize=(8.27, 3.94))
-gs = fig.add_gridspec(1, 2, width_ratios=[2, 1], wspace=0.3)
+    dat = df_rare_bar[df_rare_bar["DilutionRate"] == dil].copy()
 
-# Left: Depletion scatter
-ax1 = fig.add_subplot(gs[0])
-shapes = {1: 'o', 2: '^', 3: 's'}
-for comm in [1, 2, 3]:
-    df_i = df_depletion[df_depletion['Community'] == comm]
-    ax1.scatter(df_i['Community_CUE'], df_i['Depletion'],
-               color=pal_rgb[str(comm)], marker=shapes[comm], 
-               alpha=0.7, s=30, label=community_labels[str(comm)])
-ax1.set_xlabel('Community CUE')
-ax1.set_ylabel('Sum of Resource Residual')
-ax1.legend(title='Community', loc='best')
-set_base_theme(ax1)
+    pivot = (
+        dat.pivot_table(
+            index="CUE_bin",
+            columns="survival",
+            values="count",
+            aggfunc="sum",
+            fill_value=0
+        )
+        .reindex(interval_order)
+        .fillna(0)
+    )
 
-# Right: CUE boxplot
-ax2 = fig.add_subplot(gs[1])
-box_data = [df_depletion[df_depletion['Community'] == c]['Community_CUE'].values 
-            for c in [1, 2, 3]]
-bp = ax2.boxplot(box_data, positions=[1, 2, 3], widths=0.6, patch_artist=True,
-                 boxprops=dict(alpha=0.6),
-                 medianprops=dict(color='black', linewidth=1))
+    counts = pivot.reindex(columns=["Extinct", "Survived"], fill_value=0)
+    extinct = counts["Extinct"].to_numpy()
+    survived = counts["Survived"].to_numpy()
 
-for patch, comm in zip(bp['boxes'], [1, 2, 3]):
-    patch.set_facecolor(pal_rgb[str(comm)])
+    surv_mask = survived > 0
+    first_surv_idx = int(np.argmax(np.r_[surv_mask, True]))
 
-ax2.set_xticks([1, 2, 3])
-ax2.set_xticklabels(['P1', 'P2', 'Coal.'])
-ax2.set_ylabel('Community CUE')
-set_base_theme(ax2)
+    plot_extinct_full = np.concatenate(([extinct[:first_surv_idx].sum()], extinct[first_surv_idx:]))
+    plot_survived_full = np.concatenate(([0.0], survived[first_surv_idx:]))
 
-plt.tight_layout()
-plt.savefig('results/Residual_vs_CUE.pdf', dpi=600, bbox_inches='tight')
-print("Saved: results/Residual_vs_CUE.pdf")
-plt.close()
+    drop_leading = int(first_surv_idx == 0)
+    plot_extinct = plot_extinct_full[drop_leading:]
+    plot_survived = plot_survived_full[drop_leading:]
 
+    merged_label = f"< {interval_order[first_surv_idx].left:.2f}"
+    tick_labels_full = [merged_label] + [
+        f"{iv.left:.2f}" for iv in interval_order[first_surv_idx:]
+    ]
+    tick_labels = tick_labels_full[drop_leading:]
 
-# FIGURE SI: Competition vs Community CUE (Supplementary)
-df_comm_agg = df_surv.groupby(['Seed', 'Community', 'Competition', 'Community_CUE', 'Facilitation']).agg(
-    Species_CUE_Var=('Species_CUE', 'var')
-).reset_index()
+    x = np.arange(len(plot_extinct))
 
-fig, axes = plt.subplots(3, 1, figsize=(8.27, 7.09), sharex=False)
+    ax_bot.bar(
+        x, plot_extinct,
+        color=color_map["Extinct"],
+        edgecolor="black",
+        linewidth=0.35,
+        label="Extinct",
+        width=0.85
+    )
+    ax_bot.bar(
+        x, plot_survived,
+        bottom=plot_extinct,
+        color=color_map["Survived"],
+        edgecolor="black",
+        linewidth=0.35,
+        label="Survived",
+        width=0.85
+    )
 
-for idx, comm in enumerate([1, 2, 3]):
-    df_i = df_comm_agg[df_comm_agg['Community'] == comm]
-    ax = axes[idx]
-    ax.scatter(df_i['Competition'], df_i['Community_CUE'],
-              color=pal_rgb[str(comm)], alpha=0.4, s=15)
-    ax.set_ylabel('Community CUE')
-    ax.text(1.02, 0.5, community_labels[str(comm)], 
-            transform=ax.transAxes, va='center', rotation=-90, fontsize=12)
-    
-    # Format x-axis to show *10^-3
-    x_vals = ax.get_xticks()
-    ax.set_xticklabels([f'{x*1e3:.2f}' for x in x_vals])
-    
-    ax.grid(True, alpha=0.3, linewidth=0.3, color='grey')
-    set_base_theme(ax)
-    
-    if idx == 2:
-        ax.set_xlabel('Competition (×10$^{-3}$)')
+    ax_top.bar(
+        x, plot_extinct,
+        color=color_map["Extinct"],
+        edgecolor="black",
+        linewidth=0.35,
+        width=0.85
+    )
+    ax_top.bar(
+        x, plot_survived,
+        bottom=plot_extinct,
+        color=color_map["Survived"],
+        edgecolor="black",
+        linewidth=0.35,
+        width=0.85
+    )
 
-plt.tight_layout()
-plt.savefig('results/Competition_vs_communityCUE.pdf', dpi=600, bbox_inches='tight')
-print("Saved: results/Competition_vs_communityCUE.pdf")
-plt.close()
+    ax_top.set_title(dilution_labels[dil], pad=8)
 
-# Species competition plot
-fig, axes = plt.subplots(3, 1, figsize=(8.27, 7.09), sharex=False)
+    ax_bot.set_xlabel("Species-level CUE")
+    ax_bot.set_xticks(x)
+    ax_bot.set_xticklabels(tick_labels, rotation=40, ha="right")
 
-for idx, comm in enumerate([1, 2, 3]):
-    df_i = df_surv[df_surv['Community'] == comm]
-    ax = axes[idx]
-    ax.scatter(df_i['Species_Competition_Dot'], df_i['Species_CUE'],
-              color=pal_rgb[str(comm)], alpha=0.6, s=15)
-    ax.set_ylabel('Species CUE')
-    ax.text(1.02, 0.5, community_labels[str(comm)], 
-            transform=ax.transAxes, va='center', rotation=-90, fontsize=12)
-    ax.grid(True, alpha=0.3, linewidth=0.3, color='grey')
-    set_base_theme(ax)
-    
-    if idx == 2:
-        ax.set_xlabel('Species Competition')
+    ax_top.tick_params(axis="x", which="both", bottom=False, labelbottom=False)
+
+    ax_bot.set_ylim(0, y_low_max)
+    ax_top.set_ylim(y_high_min, y_high_max)
+
+    style_ax(ax_top, grid=False)
+    style_ax(ax_bot, grid=False)
+
+    ax_top.spines["bottom"].set_visible(False)
+    ax_bot.spines["top"].set_visible(False)
+
+    if i == 0:
+        ax_bot.set_ylabel("Number of species")
+    else:
+        ax_bot.set_ylabel("")
+        ax_bot.tick_params(axis="y", left=False, labelleft=False)
+        ax_top.tick_params(axis="y", left=False, labelleft=False)
+
+    handles, labels = ax_bot.get_legend_handles_labels()
+    leg = ax_bot.legend(
+        handles[::-1], labels[::-1],
+        loc="upper right",
+        frameon=True,
+        fancybox=False,
+        framealpha=0.6
+    )
+    leg.get_frame().set_edgecolor("black")
+    leg.get_frame().set_linewidth(0.8)
+
+d = 0.012
+kwargs_top = dict(transform=ax_top_left.transAxes, color="black", clip_on=False, linewidth=1.2)
+kwargs_bot = dict(transform=ax_bot_left.transAxes, color="black", clip_on=False, linewidth=1.2)
+
+ax_top_left.plot((-d, +d), (-d, +d), **kwargs_top)
+
+ax_bot_left.plot((-d, +d), (1 - d, 1 + d), **kwargs_bot)
 
 plt.tight_layout()
-plt.savefig('results/species_competition.pdf', dpi=600, bbox_inches='tight')
-print("Saved: results/species_competition.pdf")
-plt.close()
+plt.show()
 
-print("\n=== All figures generated successfully ===")
+
+
+
+
+# ====================================================================================================
+# ================= Species CUE vs Species actual CUE and Community CUE vs actual community CUE =====
+# ====================================================================================================
+
+df_cue_cmp = df_surv.copy()
+df_cue_cmp["Species_CUE"] = pd.to_numeric(df_cue_cmp["Species_CUE"], errors="coerce")
+df_cue_cmp["actual_CUE"] = pd.to_numeric(df_cue_cmp["actual_CUE"], errors="coerce")
+df_cue_cmp["Community_CUE"] = pd.to_numeric(df_cue_cmp["Community_CUE"], errors="coerce")
+df_cue_cmp["actual_community_CUE"] = pd.to_numeric(df_cue_cmp["actual_community_CUE"], errors="coerce")
+
+# Per-seed community-level aggregation (one value per seed × community)
+df_comm_cue = (
+    df_surv
+    .groupby(["Seed", "Community"], as_index=False)
+    .agg(
+        Community_CUE=("Community_CUE", first_unique),
+        actual_community_CUE=("actual_community_CUE", first_unique),
+    )
+)
+df_comm_cue["Community_CUE"] = pd.to_numeric(df_comm_cue["Community_CUE"], errors="coerce")
+df_comm_cue["actual_community_CUE"] = pd.to_numeric(df_comm_cue["actual_community_CUE"], errors="coerce")
+
+fig, axes = plt.subplots(2, 3, figsize=(13, 8.5))
+fig.subplots_adjust(hspace=0.38, wspace=0.3)
+
+# ── Row 0: Species_CUE vs actual_CUE ───────────────────────────────────────
+for j, comm in enumerate(["1", "2", "3"]):
+    ax = axes[0, j]
+    dat = df_cue_cmp[df_cue_cmp["Community"] == comm].dropna(subset=["Species_CUE", "actual_CUE"])
+
+    ax.scatter(
+        dat["Species_CUE"],
+        dat["actual_CUE"],
+        s=28,
+        alpha=0.45,
+        facecolors=pal_rgb[comm],
+        edgecolors="black",
+        linewidths=0.4,
+        zorder=3
+    )
+
+    lo = min(dat["Species_CUE"].min(), dat["actual_CUE"].min())
+    hi = max(dat["Species_CUE"].max(), dat["actual_CUE"].max())
+    ax.plot([lo, hi], [lo, hi], color=theory_line_color, linewidth=1.4,
+            linestyle="--", zorder=4)
+
+    ax.set_xlabel("Species CUE")
+    ax.set_ylabel("Species actual CUE")
+    ax.set_title(community_labels[comm], pad=8)
+    style_ax(ax, grid=False)
+
+# ── Row 1: Community_CUE vs actual_community_CUE ───────────────────────────
+for j, comm in enumerate(["1", "2", "3"]):
+    ax = axes[1, j]
+    dat = df_comm_cue[df_comm_cue["Community"] == comm].dropna(
+        subset=["Community_CUE", "actual_community_CUE"]
+    )
+
+    ax.scatter(
+        dat["Community_CUE"],
+        dat["actual_community_CUE"],
+        s=48,
+        alpha=0.6,
+        facecolors=pal_rgb[comm],
+        edgecolors="black",
+        linewidths=0.5,
+        zorder=3
+    )
+
+    lo = min(dat["Community_CUE"].min(), dat["actual_community_CUE"].min())
+    hi = max(dat["Community_CUE"].max(), dat["actual_community_CUE"].max())
+    ax.plot([lo, hi], [lo, hi], color=theory_line_color, linewidth=1.4,
+            linestyle="--", zorder=4)
+
+    ax.set_xlabel("Community CUE")
+    ax.set_ylabel("Community actual CUE")
+    ax.set_title(community_labels[comm], pad=8)
+    style_ax(ax, grid=False)
+
+plt.tight_layout()
+plt.show()
+
+
+
+
+# ====================================================================================================
+# ================= actual_community_CUE Time Series for One Seed ===================================
+# ====================================================================================================
+
+df_timeseries = pd.read_csv("data/coal_cue_timeseries.csv")
+df_timeseries["Community"] = df_timeseries["Community"].astype(str)
+
+# Select the first seed
+selected_seed = df_timeseries["Seed"].iloc[0]
+df_ts_seed = df_timeseries[df_timeseries["Seed"] == selected_seed].copy()
+
+fig, axes = plt.subplots(1, 3, figsize=(14, 4.5), sharey=True)
+
+for i, (ax, comm) in enumerate(zip(axes, ["1", "2", "3"])):
+    dat = df_ts_seed[df_ts_seed["Community"] == comm].sort_values("Time")
+    
+    ax.plot(
+        dat["Time"],
+        dat["actual_community_CUE"],
+        color=pal_rgb[comm],
+        linewidth=2.0,
+        alpha=0.85,
+        zorder=3
+    )
+    
+    ax.set_xlabel("Time")
+    ax.set_title(community_labels[comm], pad=8)
+    ax.set_xlim(0, dat["Time"].max())
+    
+    if i == 0:
+        ax.set_ylabel("Actual community CUE")
+    else:
+        ax.tick_params(axis="y", left=False, labelleft=False)
+    
+    style_ax(ax, grid=True)
+
+plt.tight_layout()
+plt.show()

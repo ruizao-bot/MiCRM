@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from scipy.integrate import solve_ivp
+import paramn
 from contextlib import contextmanager
 # ===================== Global parameters =====================
 M = 20

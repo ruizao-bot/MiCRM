@@ -4,6 +4,7 @@ import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from matplotlib.ticker import ScalarFormatter
 import seaborn as sns
 from pathlib import Path
 import warnings
@@ -17,32 +18,52 @@ project_root = script_dir.parent
 os.chdir(project_root)
 
 # Palette and theme setup
-pal_rgb = {"1": "#E74C3C", "2": "#2ECC71", "3": "#3498DB"}
+pal_rgb = {
+    "1": "#D8A39A",
+    "2": "#A8C3A6",
+    "3": "#9FB7CC"
+}
 community_labels = {"1": "Parent 1", "2": "Parent 2", "3": "Coalesced"}
 
 # Configure matplotlib style
-plt.rcParams['font.family'] = 'Times New Roman'
-plt.rcParams['font.size'] = 12
-plt.rcParams['mathtext.fontset'] = 'custom'
-plt.rcParams['mathtext.rm'] = 'Times New Roman'
-plt.rcParams['mathtext.it'] = 'Times New Roman:italic'
-plt.rcParams['mathtext.bf'] = 'Times New Roman:bold'
-plt.rcParams['axes.linewidth'] = 0.3
-plt.rcParams['xtick.major.width'] = 0.3
-plt.rcParams['ytick.major.width'] = 0.3
-plt.rcParams['xtick.major.size'] = 4
-plt.rcParams['ytick.major.size'] = 4
+plt.rcParams.update({
+    "font.family": "serif",
+    "font.serif": ["Times New Roman", "Times", "Nimbus Roman", "Liberation Serif"],
+    "mathtext.fontset": "custom",
+    "mathtext.rm": "Times New Roman",
+    "mathtext.it": "Times New Roman:italic",
+    "mathtext.bf": "Times New Roman:bold",
+    "font.size": 14,
+    "axes.labelsize": 14,
+    "axes.titlesize": 14,
+    "xtick.labelsize": 14,
+    "ytick.labelsize": 14,
+    "legend.fontsize": 14,
+    "axes.linewidth": 0.4,
+    "xtick.major.width": 0.4,
+    "ytick.major.width": 0.4,
+    "xtick.major.size": 4.5,
+    "ytick.major.size": 4.5,
+    "legend.frameon": False,
+    "pdf.fonttype": 42,
+    "ps.fonttype": 42
+})
 
-def set_base_theme(ax):
+def set_base_theme(ax, grid=False):
     """Apply base theme to matplotlib axes"""
-    ax.spines['top'].set_visible(True)
-    ax.spines['right'].set_visible(True)
-    ax.spines['left'].set_linewidth(0.3)
-    ax.spines['right'].set_linewidth(0.3)
-    ax.spines['top'].set_linewidth(0.3)
-    ax.spines['bottom'].set_linewidth(0.3)
-    ax.grid(False)
-    ax.tick_params(width=0.3, length=4)
+    ax.set_facecolor("white")
+    for spine in ax.spines.values():
+        spine.set_visible(True)
+        spine.set_color("black")
+        spine.set_linewidth(0.4)
+    
+    ax.tick_params(axis="both", width=0.4, colors="black", pad=4)
+    
+    if grid:
+        ax.grid(True, which="major", color="#E5E5E5", linewidth=0.35)
+        ax.grid(True, which="minor", color="#F2F2F2", linewidth=0.2)
+    else:
+        ax.grid(False)
 
 # Load data
 print("Loading data...")
@@ -96,10 +117,10 @@ for position, comm in zip(positions, ['1', '2', '3']):
 
 ax.set_xticks(positions)
 ax.set_xticklabels([community_labels[c] for c in ['1', '2', '3']])
-ax.set_ylabel('Feasibility', fontweight='bold')
-ax.set_xlabel('Community', fontweight='bold')
-ax.set_title('(A) Feasibility Comparison', loc='left')
-ax.set_yscale('log')
+ax.set_ylabel('Feasibility Scale Index')
+ax.set_xlabel('Community')
+ax.set_title('(A)', loc='left')
+ax.ticklabel_format(axis='y', style='plain', useOffset=False)
 set_base_theme(ax)
 
 # Panel B: Stability (Leading Eigenvalue) comparison
@@ -123,9 +144,9 @@ for position, comm in zip(positions, ['1', '2', '3']):
 
 ax.set_xticks(positions)
 ax.set_xticklabels([community_labels[c] for c in ['1', '2', '3']])
-ax.set_ylabel('Leading Eigenvalue', fontweight='bold')
-ax.set_xlabel('Community', fontweight='bold')
-ax.set_title('(B) Stability Comparison', loc='left')
+ax.set_ylabel('Leading Eigenvalue')
+ax.set_xlabel('Community')
+ax.set_title('(B)', loc='left')
 ax.axhline(y=0, color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
 set_base_theme(ax)
 
@@ -135,24 +156,3 @@ plt.savefig('figure/feasibility_stability_comparison.pdf', bbox_inches='tight')
 print("Saved: figure/feasibility_stability_comparison.png/pdf")
 plt.close()
 
-# ============================================================================
-# Print summary statistics
-# ============================================================================
-print("\n" + "="*60)
-print("SUMMARY STATISTICS")
-print("="*60)
-
-for comm in ['1', '2', '3']:
-    data_all = community_metrics[community_metrics['Community'] == comm]
-    data_nonzero = community_metrics_nonzero[community_metrics_nonzero['Community'] == comm]
-    print(f"\n{community_labels[comm]}:")
-    print(f"  Total samples: {len(data_all)}, Non-zero: {len(data_nonzero)} ({100*len(data_nonzero)/len(data_all):.1f}%)")
-    print(f"  Feasibility (all): {data_all['feasibility'].mean():.4e} ± {data_all['feasibility'].std():.4e}")
-    if len(data_nonzero) > 0:
-        print(f"  Feasibility (non-zero): {data_nonzero['feasibility'].mean():.4e} ± {data_nonzero['feasibility'].std():.4e}")
-    print(f"  Leading Eigenvalue: {data_all['Leading_Eigenvalue'].mean():.6f} ± {data_all['Leading_Eigenvalue'].std():.6f}")
-    print(f"  N_Survivors: {data_all['N_Survivors'].mean():.2f} ± {data_all['N_Survivors'].std():.2f}")
-
-print("\n" + "="*60)
-print("Figure saved to figure/ directory")
-print("="*60)
