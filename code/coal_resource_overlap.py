@@ -6,7 +6,11 @@ import param
 
 # Random seed and simulation parameters
 BASE_SEED = 50
-N_SIMULATIONS = 50
+
+# Stratified sampling parameters
+N_CANDIDATES = 500      # candidate seeds to screen per overlap ratio (cheap proxy step)
+N_TARGET_PER_BIN = 10   # target simulation replicates per (CUE-diff bin, overlap) cell
+N_BINS = 5              # number of equal-quantile CUE-difference bins
 
 # Exported file names
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
@@ -205,34 +209,127 @@ def simulate_overlap(args):
         "Similarity_3vs2": sim_3vs2
     }
 
+def _proxy_cue_diff(args):
+    """Compute intrinsic (pre-dynamics) mean CUE difference for a (seed, overlap) pair.
+
+    Mirrors the same RNG sequence as simulate_overlap so the community
+    composition is identical, but skips the expensive ODE integration.
+    Uses the unweighted mean of per-species intrinsic CUE as a fast proxy.
+    """
+    seed, overlap_ratio = args
+    rng = np.random.default_rng(seed)
+
+    u_pool = param.modular_uptake(N_POOL, M_POOL, N_MODULES, S_RATIO, rng)
+    # Must call generate_l_tensor to keep rng state in sync with simulate_overlap
+    param.generate_l_tensor(N_POOL, M_POOL, N_MODULES, S_RATIO, LEAKAGE_RATE, u_pool, rng)
+
+    overlap_n = int(M1 * overlap_ratio)
+    unique_n = M1 - overlap_n
+    all_resources = np.arange(M_POOL)
+    overlap_resources = rng.choice(all_resources, overlap_n, replace=False)
+    remain_resources = np.setdiff1d(all_resources, overlap_resources)
+    res1_unique = rng.choice(remain_resources, unique_n, replace=False)
+    res2_unique = rng.choice(np.setdiff1d(remain_resources, res1_unique), unique_n, replace=False)
+    resource_indices1 = np.concatenate([overlap_resources, res1_unique])
+    resource_indices2 = np.concatenate([overlap_resources, res2_unique])
+
+    species_indices1 = rng.choice(N_POOL, N1, replace=False)
+    remaining_species = np.setdiff1d(np.arange(N_POOL), species_indices1)
+    species_indices2 = rng.choice(remaining_species, N2, replace=False)
+
+    u1 = u_pool[np.ix_(species_indices1, resource_indices1)]
+    u2 = u_pool[np.ix_(species_indices2, resource_indices2)]
+    R0_1 = np.full(M1, R0_VALUE)
+    R0_2 = np.full(M2, R0_VALUE)
+
+    cue1 = float(np.mean(param.compute_species_CUE(u1, R0_1, LEAKAGE_RATE, MAINTENANCE_COST)))
+    cue2 = float(np.mean(param.compute_species_CUE(u2, R0_2, LEAKAGE_RATE, MAINTENANCE_COST)))
+    return cue1 - cue2
+
+
+
 def main():
-    """Main function to run resource overlap coalescence simulations."""
-    # Generate random seeds
+    """Two-phase stratified simulation.
+
+    Phase 1 – proxy screening: generate N_CANDIDATES seeds and compute each
+    community's intrinsic CUE (no ODE) to predict the CUE difference.
+
+    Phase 2 – stratified selection: pool proxy CUE diffs across all overlap
+    ratios, cut into N_BINS quantile bins, then pick exactly N_TARGET_PER_BIN
+    seeds per (bin, overlap) cell.
+
+    Phase 3 – full dynamics: run the complete ODE simulation only for the
+    selected seeds, guaranteeing equal replicates per bin.
+    """
     seed_generator = np.random.default_rng(BASE_SEED)
-    seeds = seed_generator.integers(0, 2**32 - 1, size=N_SIMULATIONS, dtype=np.uint32).tolist()
+    candidate_seeds = seed_generator.integers(
+        0, 2**32 - 1, size=N_CANDIDATES, dtype=np.uint32
+    ).tolist()
 
-    # Create parameter combinations
-    args_list = [(seed, overlap) for seed in seeds for overlap in OVERLAP_RATIOS]
-
-    print(f"Starting resource overlap coalescence simulations...")
-    print(f"  - Number of seeds: {len(seeds)}")
-    print(f"  - Overlap ratios: {OVERLAP_RATIOS}")
-    print(f"  - Total simulations: {len(args_list)}")
-    print(f"  - CPU cores: {cpu_count()}")
-
-    # Run parallel simulations
+    # ── Phase 1: cheap proxy screening ───────────────────────────────────────
+    proxy_args = [(s, ov) for s in candidate_seeds for ov in OVERLAP_RATIOS]
+    print(f"Phase 1: computing proxy CUE for {len(proxy_args)} candidates "
+          f"({N_CANDIDATES} seeds × {len(OVERLAP_RATIOS)} overlap ratios) …")
     with Pool(cpu_count()) as pool:
-        results = pool.map(simulate_overlap, args_list)
+        proxy_diffs = pool.map(_proxy_cue_diff, proxy_args)
 
-    # Save detailed results
+    proxy_df = pd.DataFrame({
+        "Seed":    [a[0] for a in proxy_args],
+        "Overlap": [a[1] for a in proxy_args],
+        "proxy_diff": proxy_diffs,
+    })
+
+    # Shared quantile bin edges pooled across all overlap ratios
+    _, bin_edges = pd.qcut(
+        proxy_df["proxy_diff"], q=N_BINS, retbins=True, duplicates="drop"
+    )
+    bin_edges[0]  -= 1e-9
+    bin_edges[-1] += 1e-9
+    proxy_df["bin_idx"] = pd.cut(
+        proxy_df["proxy_diff"], bins=bin_edges, labels=False
+    ).astype(int)
+
+    # ── Phase 2: stratified selection ────────────────────────────────────────
+    print(f"Phase 2: selecting {N_TARGET_PER_BIN} replicates per "
+          f"(bin, overlap) cell ({N_BINS} bins × {len(OVERLAP_RATIOS)} overlaps) …")
+    rng = np.random.default_rng(BASE_SEED + 1)
+    selected_rows = []
+    for b in range(N_BINS):
+        for ov in OVERLAP_RATIOS:
+            cell = proxy_df[(proxy_df["bin_idx"] == b) & (proxy_df["Overlap"] == ov)]
+            n = min(N_TARGET_PER_BIN, len(cell))
+            if n < N_TARGET_PER_BIN:
+                print(f"  Warning: bin {b}, overlap {ov}: only {len(cell)} candidates "
+                      f"(wanted {N_TARGET_PER_BIN}). Consider increasing N_CANDIDATES.")
+            chosen = cell.sample(
+                n=n, replace=False, random_state=int(rng.integers(2**31))
+            )
+            selected_rows.append(chosen)
+
+    selected_df = pd.concat(selected_rows, ignore_index=True)
+    sim_args = list(zip(selected_df["Seed"].tolist(), selected_df["Overlap"].tolist()))
+
+    # ── Phase 3: full dynamics on selected seeds ──────────────────────────────
+    print(f"Phase 3: running {len(sim_args)} full ODE simulations on {cpu_count()} cores …")
+    with Pool(cpu_count()) as pool:
+        results = pool.map(simulate_overlap, sim_args)
+
     df = pd.DataFrame(results)
+    df["CUE_diff"] = df["CUE1"] - df["CUE2"]
+
+    # Attach proxy bin index for reporting
+    df = df.merge(
+        selected_df[["Seed", "Overlap", "bin_idx"]],
+        on=["Seed", "Overlap"],
+        how="left"
+    )
+
     os.makedirs(DATA_DIR, exist_ok=True)
     df.to_csv(COAL_RESOURCE_FILE, index=False)
 
-    # Generate summary statistics
-    print(f"\nSimulation completed!")
-    print(f"  - Results saved to: {COAL_RESOURCE_FILE}")
-    print(f"  - Total records: {len(df)}")
+    print(f"\nSimulation completed!  {len(df)} records → {COAL_RESOURCE_FILE}")
+    print("\nReplicate counts per (proxy-CUE-diff bin, overlap):")
+    print(df.groupby(["bin_idx", "Overlap"]).size().unstack(fill_value=0).to_string())
 
 if __name__ == "__main__":
     main()

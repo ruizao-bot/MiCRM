@@ -7,12 +7,10 @@ import param
 
 # Random seed and simulation parameters
 BASE_SEED = 37
-N_SIMULATIONS = 100
+N_SIMULATIONS = 20
 
 # Exported file names
-COAL_FILE = "data/coal.csv"
-COAL_SUMMARY_FILE = "data/coal_summary.csv"
-COAL_CUE_TIMESERIES_FILE = "data/coal_cue_timeseries.csv"
+COAL_FILE = "data/coal_rho2.csv"
 
 # Species pooland resource pool parameters
 N_POOL = 1000
@@ -39,6 +37,11 @@ SURVIVAL_THRESHOLD = 1e-5
 EV_THRESHOLD = 0.00
 
 INTE_CUE_N_SAVE_POINTS = 40
+
+# Mechanistic theory curve settings
+THEORY_LOCAL_Q = 0.35
+MIN_POINTS_FOR_THEORY = 5
+COAL_THEORY_PARAMS_FILE = "data/cue_abundance_theory_params_rho2.csv"
 
 
 # =============================================================================
@@ -92,12 +95,8 @@ def compute_actual_cue(u, l, sol, N, m, C0):
  
     uptake_pb_t, anab_pb_t = _flux_rates(u, l, R_t, m, N)
  
-    # Absolute fluxes (multiply per-biomass rate by C_i(t))
-    uptake_abs_t = C_t * uptake_pb_t  # (N, T)
-    anab_abs_t = C_t * anab_pb_t      # (N, T)
- 
-    total_uptake = np.trapezoid(uptake_abs_t, x=t, axis=1)  # (N,)
-    total_anab = np.trapezoid(anab_abs_t, x=t, axis=1)      # (N,)
+    total_uptake = np.trapezoid(C_t * uptake_pb_t, x=t, axis=1)  # (N,) biomass-weighted uptake
+    total_anab = np.trapezoid(C_t * anab_pb_t, x=t, axis=1)      # (N,) biomass-weighted anabolism
  
     actual_cue = np.divide(
         total_anab,
@@ -128,20 +127,172 @@ def compute_actual_community_cue(u, l, sol, N, m, C0, survivor_idx=None):
         N_eff = survivor_idx.size
     else:
         N_eff = N
- 
+
     uptake_pb_t, anab_pb_t = _flux_rates(u, l, R_t, m, N_eff)
- 
-    # Sum absolute fluxes over species at each time point
-    uptake_comm_t = np.sum(C_t * uptake_pb_t, axis=0)  # (T,)
-    anab_comm_t = np.sum(C_t * anab_pb_t, axis=0)      # (T,)
- 
-    total_uptake = np.trapezoid(uptake_comm_t, x=t)
-    total_anab = np.trapezoid(anab_comm_t, x=t)
- 
+
+    total_uptake = np.sum(np.trapezoid(C_t * uptake_pb_t, x=t, axis=1))  # Σ_i ∫ C_i(t)·uptake_pb_i dt
+    total_anab = np.sum(np.trapezoid(C_t * anab_pb_t, x=t, axis=1))      # Σ_i ∫ C_i(t)·anab_pb_i dt
+
     if np.abs(total_uptake) < 1e-12:
         return np.nan
     return total_anab / total_uptake
  
+
+# =============================================================================
+# Mechanistic theory curve functions (migrated from main_for_plot)
+# =============================================================================
+
+def cue_abundance_theory(eps, eps_c, H, Cmax):
+    eps = np.asarray(eps, dtype=float)
+    if not np.isfinite(eps_c) or not np.isfinite(H) or not np.isfinite(Cmax):
+        return np.full_like(eps, np.nan, dtype=float)
+    H = max(float(H), 1e-12)
+    Cmax = max(float(Cmax), 1e-12)
+    delta = np.maximum(eps - eps_c, 0.0)
+    return Cmax * (1.0 - np.exp(-delta / H))
+
+
+def _gi_of_R(u_i, eta_i, R):
+    return np.sum(u_i * eta_i * R)
+
+
+def _solve_resident_env(species_idx, N, M, u, l, m, lambda_alpha, rho, omega, C_full, R_full, t_span):
+    keep = np.arange(N) != species_idx
+    N_res = int(np.sum(keep))
+    if N_res == 0:
+        return np.asarray(rho, dtype=float) / np.maximum(np.asarray(omega, dtype=float), 1e-12)
+    u_res = u[keep]
+    l_res = l[keep]
+    m_res = _ensure_m_vec(m, N)[keep]
+    C0_res = np.maximum(C_full[keep], 1e-12)
+    R0_res = np.maximum(R_full, 1e-12)
+    sol_res = param.solve_micrm(
+        N_res, M, u_res, l_res, m_res, lambda_alpha, rho, omega,
+        C0_res, R0_res, t_span, t_eval=None, n_save_points=2
+    )
+    return np.maximum(sol_res.y[N_res:, -1], 0.0)
+
+
+def compute_mechanistic_curve_params(N, M, u, l, m, lambda_alpha, rho, omega,
+                                     R0_ref, C_full, R_full, t_span,
+                                     survival_threshold=1e-5, local_q=0.35):
+    eta, Gi0, Ui0, eps = compute_Gi0_Ui0_eps(u, l, R0_ref, m)
+    eps_c = np.full(N, np.nan)
+    gi_res = np.full(N, np.nan)
+    gi_full = np.full(N, np.nan)
+    D_obs = np.full(N, np.nan)
+    chi_obs = np.full(N, np.nan)
+
+    survivor_indices = np.where(C_full > survival_threshold)[0]
+    for i in survivor_indices:
+        R_res_i = _solve_resident_env(i, N, M, u, l, m, lambda_alpha, rho, omega, C_full, R_full, t_span)
+        gi_res[i] = _gi_of_R(u[i], eta[i], R_res_i)
+        gi_full[i] = _gi_of_R(u[i], eta[i], R_full)
+        eps_c[i] = (Gi0[i] - gi_res[i]) / (Ui0[i] + 1e-12)
+        D_obs[i] = gi_res[i] - gi_full[i]
+        if np.isfinite(D_obs[i]) and (D_obs[i] > 0):
+            chi_obs[i] = D_obs[i] / max(C_full[i], 1e-12)
+
+    delta_eps = np.maximum(eps - eps_c, 0.0)
+    valid = (
+        np.isfinite(chi_obs) & np.isfinite(delta_eps) & np.isfinite(C_full) &
+        (delta_eps > 0) & (C_full > survival_threshold) & (D_obs > 0)
+    )
+    near_mask = valid.copy()
+    if np.sum(valid) >= MIN_POINTS_FOR_THEORY:
+        delta_cut = np.quantile(delta_eps[valid], local_q)
+        abund_cut = np.quantile(C_full[valid], local_q)
+        near_mask = valid & (delta_eps <= delta_cut) & (C_full <= abund_cut)
+        if np.sum(near_mask) < 3:
+            near_mask = valid
+
+    chi_bar = np.nanmedian(chi_obs[near_mask]) if np.any(near_mask) else np.nan
+    U_bar = np.nanmedian(Ui0[near_mask]) if np.any(near_mask) else np.nanmedian(Ui0[np.isfinite(Ui0)])
+    eps_c_bar = np.nanmedian(eps_c[np.isfinite(eps_c)])
+    Cmax = np.nanmax(C_full[np.isfinite(C_full)]) if np.any(np.isfinite(C_full)) else np.nan
+
+    H = np.nan
+    if all(np.isfinite(v) and v > 0 for v in [chi_bar, U_bar, Cmax]):
+        H = chi_bar * Cmax / U_bar
+
+    surv_mask = np.isfinite(C_full) & (C_full > survival_threshold)
+    y_pred = cue_abundance_theory(eps, eps_c_bar, H, Cmax)
+    if np.any(surv_mask) and np.all(np.isfinite(y_pred[surv_mask])):
+        log_obs = np.log10(np.maximum(C_full[surv_mask], survival_threshold))
+        log_pred = np.log10(np.maximum(y_pred[surv_mask], survival_threshold))
+        ss_res = np.sum((log_obs - log_pred) ** 2)
+        ss_tot = np.sum((log_obs - np.mean(log_obs)) ** 2)
+        theory_R2_log = np.nan if ss_tot <= 0 else 1 - ss_res / ss_tot
+    else:
+        theory_R2_log = np.nan
+
+    species_df = pd.DataFrame({
+        "Gi0": Gi0, "Ui0": Ui0, "eps_c_i": eps_c, "Delta_eps_i": delta_eps,
+        "gi_res_i": gi_res, "gi_full_i": gi_full, "D_obs_i": D_obs, "chi_i_obs": chi_obs
+    })
+    params = {
+        "eps_c": eps_c_bar, "chi_bar": chi_bar, "U_bar": U_bar,
+        "Cmax": Cmax, "H": H, "Theory_R2_log": theory_R2_log,
+        "NearThresholdUsed": int(np.sum(near_mask)),
+        "N_survivors": int(np.sum(surv_mask))
+    }
+    return species_df, params
+
+
+def estimate_theory_params_mechanistic(df_comm, survival_threshold=1e-5):
+    dat = df_comm.copy()
+    dat = dat[np.isfinite(dat["Species_CUE"]) & np.isfinite(dat["Abundance"])]
+    if len(dat) < MIN_POINTS_FOR_THEORY:
+        return None
+    required_cols = ["Theory_eps_c_seed", "Theory_chi_bar_seed", "Theory_U_bar_seed",
+                     "Theory_Cmax_seed", "Theory_H_seed"]
+    if not all(col in dat.columns for col in required_cols):
+        return None
+
+    seed_params = (
+        dat.groupby("Seed", as_index=False)
+        .agg(
+            eps_c=("Theory_eps_c_seed", "first"),
+            chi_bar=("Theory_chi_bar_seed", "first"),
+            U_bar=("Theory_U_bar_seed", "first"),
+            Cmax=("Theory_Cmax_seed", "first"),
+            H_seed=("Theory_H_seed", "first"),
+            Theory_R2_log_seed=("Theory_R2_log_seed", "first"),
+            NearThresholdUsed=("Theory_NearThresholdUsed_seed", "first")
+        )
+    )
+    eps_c = np.nanmedian(seed_params["eps_c"])
+    chi_bar = np.nanmedian(seed_params["chi_bar"])
+    U_bar = np.nanmedian(seed_params["U_bar"])
+    Cmax = np.nanmedian(seed_params["Cmax"])
+    if not all(np.isfinite(v) and v > 0 for v in [chi_bar, U_bar, Cmax]):
+        return None
+    if not np.isfinite(eps_c):
+        return None
+    H = chi_bar * Cmax / U_bar
+
+    x = dat["Species_CUE"].to_numpy()
+    y = dat["Abundance"].to_numpy()
+    y_pred = cue_abundance_theory(x, eps_c, H, Cmax)
+    surv_mask = y > survival_threshold
+    if np.any(surv_mask):
+        log_obs = np.log10(np.maximum(y[surv_mask], survival_threshold))
+        log_pred = np.log10(np.maximum(y_pred[surv_mask], survival_threshold))
+        ss_res = np.sum((log_obs - log_pred) ** 2)
+        ss_tot = np.sum((log_obs - np.mean(log_obs)) ** 2)
+        theory_R2_log = np.nan if ss_tot <= 0 else 1 - ss_res / ss_tot
+    else:
+        theory_R2_log = np.nan
+
+    return {
+        "eps_c": eps_c, "chi_bar": chi_bar, "U_bar": U_bar, "H": H, "Cmax": Cmax,
+        "Theory_R2_log": theory_R2_log,
+        "N_total": len(dat),
+        "N_survivors": int(np.sum(surv_mask)),
+        "N_seeds": len(seed_params),
+        "NearThresholdUsed_median": np.nanmedian(seed_params["NearThresholdUsed"])
+    }
+
 
 def simulate(seed):
     rng = np.random.default_rng(seed)
@@ -209,7 +360,7 @@ def simulate(seed):
     N3 = N1 + N2
     M3 = len(resource_indices3)
     lambda_alpha3 = np.full(M3, LEAKAGE_RATE)
-    rho3 = np.full(M3, RHO_VALUE)
+    rho3 = np.full(M3, 2 * RHO_VALUE)
     omega3 = np.full(M3, OMEGA_VALUE)
     C0_3 = np.concatenate([sol1.y[:N1, -1], sol2.y[:N2, -1]])
     R0_3 = np.full(M3, R0_VALUE)
@@ -294,6 +445,24 @@ def simulate(seed):
     origin2_in_coalesced = np.sum(C_final3[N1:])
     dominant = "Community 1" if origin1_in_coalesced > origin2_in_coalesced else "Community 2"
     lambda_vec3 = np.full(N3, LEAKAGE_RATE)
+
+    # Mechanistic theory curve params (leave-one-out ODE per species)
+    mech1, tparams1 = compute_mechanistic_curve_params(
+        N1, M1, u1, l1, MAINTENANCE_COST, lambda_alpha1, rho1, omega1,
+        R0_1, C_final1, np.maximum(R_final1, 0.0), T_SPAN, SURVIVAL_THRESHOLD, THEORY_LOCAL_Q
+    )
+    mech2, tparams2 = compute_mechanistic_curve_params(
+        N2, M2, u2, l2, MAINTENANCE_COST, lambda_alpha2, rho2, omega2,
+        R0_2, C_final2, np.maximum(R_final2, 0.0), T_SPAN, SURVIVAL_THRESHOLD, THEORY_LOCAL_Q
+    )
+    mech3, tparams3 = compute_mechanistic_curve_params(
+        N3, M3, u3, l3, MAINTENANCE_COST, lambda_alpha3, rho3, omega3,
+        R0_3, C_final3, np.maximum(R_final3, 0.0), T_SPAN, SURVIVAL_THRESHOLD, THEORY_LOCAL_Q
+    )
+    pred1 = cue_abundance_theory(species_CUE1, tparams1["eps_c"], tparams1["H"], tparams1["Cmax"])
+    pred2 = cue_abundance_theory(species_CUE2, tparams2["eps_c"], tparams2["H"], tparams2["Cmax"])
+    pred3 = cue_abundance_theory(species_CUE3, tparams3["eps_c"], tparams3["H"], tparams3["Cmax"])
+
     alpha1, r1 = param.calculate_elv_params(C_final1, R_final1, N1, M1, u1, l1, MAINTENANCE_COST, rho1, omega1, lambda_vec1)
     alpha2, r2 = param.calculate_elv_params(C_final2, R_final2, N2, M2, u2, l2, MAINTENANCE_COST, rho2, omega2, lambda_vec2)
     alpha3, r3 = param.calculate_elv_params(C_final3, R_final3, N3, M3, u3, l3, MAINTENANCE_COST, rho3, omega3, lambda_vec3)
@@ -338,6 +507,17 @@ def simulate(seed):
             "Facilitation": facilitation1[i], "Depletion": depletion1,
             "UptakeVar": uptake_var1[i], "N_Survivors": survivors1_count,
             "feasibility": feas1_val, "Leading_Eigenvalue": float(ev1),
+            "Growth_Rate": float(r1[i]),
+            "Theory_Abundance": pred1[i],
+            "Theory_DeltaEps": max(species_CUE1[i] - tparams1["eps_c"], 0.0),
+            "Gi0": mech1.loc[i, "Gi0"], "Ui0": mech1.loc[i, "Ui0"],
+            "eps_c_i": mech1.loc[i, "eps_c_i"], "Delta_eps_i": mech1.loc[i, "Delta_eps_i"],
+            "gi_res_i": mech1.loc[i, "gi_res_i"], "gi_full_i": mech1.loc[i, "gi_full_i"],
+            "D_obs_i": mech1.loc[i, "D_obs_i"], "chi_i_obs": mech1.loc[i, "chi_i_obs"],
+            "Theory_eps_c_seed": tparams1["eps_c"], "Theory_chi_bar_seed": tparams1["chi_bar"],
+            "Theory_U_bar_seed": tparams1["U_bar"], "Theory_Cmax_seed": tparams1["Cmax"],
+            "Theory_H_seed": tparams1["H"], "Theory_R2_log_seed": tparams1["Theory_R2_log"],
+            "Theory_NearThresholdUsed_seed": tparams1["NearThresholdUsed"],
         }
         species_data.append(row)
 
@@ -356,6 +536,17 @@ def simulate(seed):
             "Facilitation": facilitation2[i], "Depletion": depletion2,
             "UptakeVar": uptake_var2[i], "N_Survivors": survivors2_count,
             "feasibility": feas2_val, "Leading_Eigenvalue": float(ev2),
+            "Growth_Rate": float(r2[i]),
+            "Theory_Abundance": pred2[i],
+            "Theory_DeltaEps": max(species_CUE2[i] - tparams2["eps_c"], 0.0),
+            "Gi0": mech2.loc[i, "Gi0"], "Ui0": mech2.loc[i, "Ui0"],
+            "eps_c_i": mech2.loc[i, "eps_c_i"], "Delta_eps_i": mech2.loc[i, "Delta_eps_i"],
+            "gi_res_i": mech2.loc[i, "gi_res_i"], "gi_full_i": mech2.loc[i, "gi_full_i"],
+            "D_obs_i": mech2.loc[i, "D_obs_i"], "chi_i_obs": mech2.loc[i, "chi_i_obs"],
+            "Theory_eps_c_seed": tparams2["eps_c"], "Theory_chi_bar_seed": tparams2["chi_bar"],
+            "Theory_U_bar_seed": tparams2["U_bar"], "Theory_Cmax_seed": tparams2["Cmax"],
+            "Theory_H_seed": tparams2["H"], "Theory_R2_log_seed": tparams2["Theory_R2_log"],
+            "Theory_NearThresholdUsed_seed": tparams2["NearThresholdUsed"],
         }
         species_data.append(row)
 
@@ -374,10 +565,39 @@ def simulate(seed):
             "Facilitation": facilitation3[i], "Depletion": depletion3,
             "UptakeVar": uptake_var3[i], "N_Survivors": survivors3_count,
             "feasibility": feas3_val, "Leading_Eigenvalue": float(ev3),
+            "Growth_Rate": float(r3[i]),
+            "Theory_Abundance": pred3[i],
+            "Theory_DeltaEps": max(species_CUE3[i] - tparams3["eps_c"], 0.0),
+            "Gi0": mech3.loc[i, "Gi0"], "Ui0": mech3.loc[i, "Ui0"],
+            "eps_c_i": mech3.loc[i, "eps_c_i"], "Delta_eps_i": mech3.loc[i, "Delta_eps_i"],
+            "gi_res_i": mech3.loc[i, "gi_res_i"], "gi_full_i": mech3.loc[i, "gi_full_i"],
+            "D_obs_i": mech3.loc[i, "D_obs_i"], "chi_i_obs": mech3.loc[i, "chi_i_obs"],
+            "Theory_eps_c_seed": tparams3["eps_c"], "Theory_chi_bar_seed": tparams3["chi_bar"],
+            "Theory_U_bar_seed": tparams3["U_bar"], "Theory_Cmax_seed": tparams3["Cmax"],
+            "Theory_H_seed": tparams3["H"], "Theory_R2_log_seed": tparams3["Theory_R2_log"],
+            "Theory_NearThresholdUsed_seed": tparams3["NearThresholdUsed"],
         }
         species_data.append(row)
 
     # Collect time series data
+    t1, t2, t3 = sol1.t, sol2.t, sol3.t
+
+    def _instantaneous_community_cue(u, l, sol, N, m, survivor_idx):
+        C_t = np.maximum(sol.y[:N, :], 0.0)
+        R_t = np.maximum(sol.y[N:, :], 0.0)
+        idx = np.asarray(survivor_idx, dtype=int)
+        C_s = C_t[idx, :]
+        uptake_pb_t, anab_pb_t = _flux_rates(u[idx], l[idx], R_t, m, idx.size)
+        uptake_comm = np.sum(C_s * uptake_pb_t, axis=0)
+        anab_comm = np.sum(C_s * anab_pb_t, axis=0)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            cue_ts = np.where(np.abs(uptake_comm) > 1e-12, anab_comm / uptake_comm, np.nan)
+        return cue_ts
+
+    cue_ts1 = _instantaneous_community_cue(u1, l1, sol1, N1, MAINTENANCE_COST, survivors1_t if len(survivors1_t) else np.arange(N1))
+    cue_ts2 = _instantaneous_community_cue(u2, l2, sol2, N2, MAINTENANCE_COST, survivors2_t if len(survivors2_t) else np.arange(N2))
+    cue_ts3 = _instantaneous_community_cue(u3, l3, sol3, N3, MAINTENANCE_COST, survivors3_t if len(survivors3_t) else np.arange(N3))
+
     timeseries_data = []
     for idx, time_val in enumerate(t1):
         timeseries_data.append({
@@ -432,6 +652,24 @@ def main():
     df = pd.DataFrame(all_species_data)
     df.to_csv(COAL_FILE, index=False)
     print(f"Saved: {COAL_FILE}")
+
+    # Estimate cross-seed theory params per community and save
+    params_rows = []
+    for comm in sorted(df["Community"].astype(str).unique()):
+        dat_comm = df[df["Community"].astype(str) == comm].copy()
+        params = estimate_theory_params_mechanistic(dat_comm, survival_threshold=SURVIVAL_THRESHOLD)
+        if params is None:
+            params_rows.append({
+                "Community": comm, "eps_c": np.nan, "chi_bar": np.nan, "U_bar": np.nan,
+                "H": np.nan, "Cmax": np.nan, "Theory_R2_log": np.nan,
+                "N_total": len(dat_comm),
+                "N_survivors": int(np.sum(dat_comm["Abundance"] > SURVIVAL_THRESHOLD)),
+                "N_seeds": dat_comm["Seed"].nunique(), "NearThresholdUsed_median": np.nan
+            })
+        else:
+            params_rows.append({"Community": comm, **params})
+    pd.DataFrame(params_rows).to_csv(COAL_THEORY_PARAMS_FILE, index=False)
+    print(f"Saved: {COAL_THEORY_PARAMS_FILE}")
 
 
 if __name__ == "__main__":

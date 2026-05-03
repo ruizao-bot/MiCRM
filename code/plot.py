@@ -585,6 +585,7 @@ ax2.set_xticklabels(
 style_ax(ax2, grid=False)
 
 plt.tight_layout()
+plt.savefig("figure/combine.pdf", bbox_inches="tight")
 plt.show()
 
 
@@ -843,134 +844,6 @@ kwargs_bot = dict(transform=ax_bot_left.transAxes, color="black", clip_on=False,
 ax_top_left.plot((-d, +d), (-d, +d), **kwargs_top)
 
 ax_bot_left.plot((-d, +d), (1 - d, 1 + d), **kwargs_bot)
-
-plt.tight_layout()
-plt.show()
-
-
-
-
-
-# ====================================================================================================
-# ================= Species CUE vs Species actual CUE and Community CUE vs actual community CUE =====
-# ====================================================================================================
-
-df_cue_cmp = df_surv.copy()
-df_cue_cmp["Species_CUE"] = pd.to_numeric(df_cue_cmp["Species_CUE"], errors="coerce")
-df_cue_cmp["actual_CUE"] = pd.to_numeric(df_cue_cmp["actual_CUE"], errors="coerce")
-df_cue_cmp["Community_CUE"] = pd.to_numeric(df_cue_cmp["Community_CUE"], errors="coerce")
-df_cue_cmp["actual_community_CUE"] = pd.to_numeric(df_cue_cmp["actual_community_CUE"], errors="coerce")
-
-# Per-seed community-level aggregation (one value per seed × community)
-df_comm_cue = (
-    df_surv
-    .groupby(["Seed", "Community"], as_index=False)
-    .agg(
-        Community_CUE=("Community_CUE", first_unique),
-        actual_community_CUE=("actual_community_CUE", first_unique),
-    )
-)
-df_comm_cue["Community_CUE"] = pd.to_numeric(df_comm_cue["Community_CUE"], errors="coerce")
-df_comm_cue["actual_community_CUE"] = pd.to_numeric(df_comm_cue["actual_community_CUE"], errors="coerce")
-
-fig, axes = plt.subplots(2, 3, figsize=(13, 8.5))
-fig.subplots_adjust(hspace=0.38, wspace=0.3)
-
-# ── Row 0: Species_CUE vs actual_CUE ───────────────────────────────────────
-for j, comm in enumerate(["1", "2", "3"]):
-    ax = axes[0, j]
-    dat = df_cue_cmp[df_cue_cmp["Community"] == comm].dropna(subset=["Species_CUE", "actual_CUE"])
-
-    ax.scatter(
-        dat["Species_CUE"],
-        dat["actual_CUE"],
-        s=28,
-        alpha=0.45,
-        facecolors=pal_rgb[comm],
-        edgecolors="black",
-        linewidths=0.4,
-        zorder=3
-    )
-
-    lo = min(dat["Species_CUE"].min(), dat["actual_CUE"].min())
-    hi = max(dat["Species_CUE"].max(), dat["actual_CUE"].max())
-    ax.plot([lo, hi], [lo, hi], color=theory_line_color, linewidth=1.4,
-            linestyle="--", zorder=4)
-
-    ax.set_xlabel("Species CUE")
-    ax.set_ylabel("Species actual CUE")
-    ax.set_title(community_labels[comm], pad=8)
-    style_ax(ax, grid=False)
-
-# ── Row 1: Community_CUE vs actual_community_CUE ───────────────────────────
-for j, comm in enumerate(["1", "2", "3"]):
-    ax = axes[1, j]
-    dat = df_comm_cue[df_comm_cue["Community"] == comm].dropna(
-        subset=["Community_CUE", "actual_community_CUE"]
-    )
-
-    ax.scatter(
-        dat["Community_CUE"],
-        dat["actual_community_CUE"],
-        s=48,
-        alpha=0.6,
-        facecolors=pal_rgb[comm],
-        edgecolors="black",
-        linewidths=0.5,
-        zorder=3
-    )
-
-    lo = min(dat["Community_CUE"].min(), dat["actual_community_CUE"].min())
-    hi = max(dat["Community_CUE"].max(), dat["actual_community_CUE"].max())
-    ax.plot([lo, hi], [lo, hi], color=theory_line_color, linewidth=1.4,
-            linestyle="--", zorder=4)
-
-    ax.set_xlabel("Community CUE")
-    ax.set_ylabel("Community actual CUE")
-    ax.set_title(community_labels[comm], pad=8)
-    style_ax(ax, grid=False)
-
-plt.tight_layout()
-plt.show()
-
-
-
-
-# ====================================================================================================
-# ================= actual_community_CUE Time Series for One Seed ===================================
-# ====================================================================================================
-
-df_timeseries = pd.read_csv("data/coal_cue_timeseries.csv")
-df_timeseries["Community"] = df_timeseries["Community"].astype(str)
-
-# Select the first seed
-selected_seed = df_timeseries["Seed"].iloc[0]
-df_ts_seed = df_timeseries[df_timeseries["Seed"] == selected_seed].copy()
-
-fig, axes = plt.subplots(1, 3, figsize=(14, 4.5), sharey=True)
-
-for i, (ax, comm) in enumerate(zip(axes, ["1", "2", "3"])):
-    dat = df_ts_seed[df_ts_seed["Community"] == comm].sort_values("Time")
-    
-    ax.plot(
-        dat["Time"],
-        dat["actual_community_CUE"],
-        color=pal_rgb[comm],
-        linewidth=2.0,
-        alpha=0.85,
-        zorder=3
-    )
-    
-    ax.set_xlabel("Time")
-    ax.set_title(community_labels[comm], pad=8)
-    ax.set_xlim(0, dat["Time"].max())
-    
-    if i == 0:
-        ax.set_ylabel("Actual community CUE")
-    else:
-        ax.tick_params(axis="y", left=False, labelleft=False)
-    
-    style_ax(ax, grid=True)
 
 plt.tight_layout()
 plt.show()

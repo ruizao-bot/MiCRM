@@ -76,7 +76,7 @@ def first_unique(series):
     vals = pd.Series(series).dropna().unique()
     return vals[0] if len(vals) > 0 else np.nan
 
-df = pd.read_csv("data/coal_actual.csv")
+df = pd.read_csv("data/coal.csv")
 df = df.rename(columns={
     "Species_Competition_Dot": "Species_Competition2"
 })
@@ -500,7 +500,6 @@ for grp in ["Community 1", "Community 2"]:
     )
 
 ax1.axhline(0, linestyle="--", color="black", linewidth=0.7)
-ax1.set_xlim(-0.02, 0.02)
 ax1.set_xlabel(r"Community actual CUE difference")
 ax1.set_ylabel(r"Similarity difference")
 ax1.legend(
@@ -886,3 +885,115 @@ plt.show()
 
 # plt.tight_layout()
 # plt.show()
+
+
+
+
+# ====================================================================================================
+# ====================== actual CUE vs CUE (species-level & community-level) =========================
+# ====================================================================================================
+
+fig, axes = plt.subplots(2, 3, figsize=(13, 8.5))
+fig.subplots_adjust(hspace=0.38, wspace=0.28)
+
+# ---------- Row 1: Species-level ----------
+for j, comm in enumerate(["1", "2", "3"]):
+    ax = axes[0, j]
+    dat = df_surv[df_surv["Community"] == comm].dropna(subset=["Species_CUE", "actual_CUE"])
+
+    ax.scatter(
+        dat["Species_CUE"],
+        dat["actual_CUE"],
+        s=30,
+        alpha=0.45,
+        facecolors=pal_rgb[comm],
+        edgecolors="black",
+        linewidths=0.4,
+        zorder=3
+    )
+
+    lims = [
+        min(dat["Species_CUE"].min(), dat["actual_CUE"].min()),
+        max(dat["Species_CUE"].max(), dat["actual_CUE"].max())
+    ]
+    ax.plot(lims, lims, "--", color="black", linewidth=0.9, zorder=2)
+
+    ax.set_xlabel("Species CUE (theory)")
+    ax.set_ylabel("Species actual CUE")
+    ax.set_title(community_labels[comm], pad=8)
+    style_ax(ax, grid=False)
+
+# ---------- Row 2: Community-level ----------
+df_comm_cue = (
+    df.groupby(["Seed", "Community"], as_index=False)
+    .agg(
+        actual_community_CUE=("actual_community_CUE", first_unique),
+        Community_CUE=("Community_CUE", first_unique),
+        Community_CUE_surv=("Community_CUE_surv", first_unique)
+    )
+)
+
+for j, comm in enumerate(["1", "2", "3"]):
+    ax = axes[1, j]
+    dat = df_comm_cue[df_comm_cue["Community"] == comm].dropna(
+        subset=["Community_CUE_surv", "actual_community_CUE"]
+    )
+
+    ax.scatter(
+        dat["Community_CUE_surv"],
+        dat["actual_community_CUE"],
+        s=40,
+        alpha=0.55,
+        facecolors=pal_rgb[comm],
+        edgecolors="black",
+        linewidths=0.4,
+        zorder=3
+    )
+
+    lims = [
+        min(dat["Community_CUE_surv"].min(), dat["actual_community_CUE"].min()),
+        max(dat["Community_CUE_surv"].max(), dat["actual_community_CUE"].max())
+    ]
+    ax.plot(lims, lims, "--", color="black", linewidth=0.9, zorder=2)
+
+    ax.set_xlabel("Community CUE (survivors, theory)")
+    ax.set_ylabel("Community actual CUE")
+    ax.set_title(community_labels[comm], pad=8)
+    style_ax(ax, grid=False)
+
+plt.tight_layout()
+plt.show()
+
+
+
+
+# ====================================================================================================
+# ========================== Growth Rate vs Biomass (eLV r_i vs C_i) ==================================
+# ====================================================================================================
+
+fig, axes = plt.subplots(1, 3, figsize=(13, 4.5), sharey=False)
+
+for j, comm in enumerate(["1", "2", "3"]):
+    ax = axes[j]
+    dat = df_surv[df_surv["Community"] == comm].dropna(subset=["Growth_Rate", "log10_Abundance"])
+
+    ax.scatter(
+        dat["Growth_Rate"],
+        dat["log10_Abundance"],
+        s=30,
+        alpha=0.45,
+        facecolors=pal_rgb[comm],
+        edgecolors="black",
+        linewidths=0.4,
+        zorder=3
+    )
+
+    ax.axvline(0, linestyle="--", color="black", linewidth=0.8, zorder=2)
+
+    ax.set_xlabel(r"Growth rate $r_i$ (eLV)")
+    ax.set_ylabel(r"Biomass ($\log_{10}$ scale)")
+    ax.set_title(community_labels[comm], pad=8)
+    style_ax(ax, grid=False)
+
+plt.tight_layout()
+plt.show()
