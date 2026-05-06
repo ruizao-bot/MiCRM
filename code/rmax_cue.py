@@ -195,7 +195,7 @@ def plot(df, out_path):
     fig, ax = plt.subplots(figsize=(5, 3.5))
     ax.scatter(
         df_plot["intrinsic_CUE"], df_plot["growth_CUE"],
-        s=5, alpha=0.45,
+        s=30, alpha=0.5,
         facecolors="#9FB7CC", edgecolors="black", linewidths=0.4,
         zorder=3,
     )
@@ -243,7 +243,7 @@ if __name__ == "__main__":
     print(f"Results saved → {out_csv}")
     print(df[["intrinsic_CUE", "rmax", "growth_CUE"]].describe().round(4))
 
-    out_fig = os.path.join(os.path.dirname(__file__), "../results/monoculture_figures/rmax_cue.pdf")
+    out_fig = os.path.join(os.path.dirname(__file__), "../figure/rmax_cue.pdf")
     os.makedirs(os.path.dirname(out_fig), exist_ok=True)
     plot(df, out_fig)
 

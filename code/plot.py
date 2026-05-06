@@ -76,7 +76,7 @@ def first_unique(series):
     vals = pd.Series(series).dropna().unique()
     return vals[0] if len(vals) > 0 else np.nan
 
-df = pd.read_csv("data/coal.csv")
+df = pd.read_csv("data/coal_hpc.csv")
 df = df.rename(columns={"Species_Competition_Dot": "Species_Competition2"})
 df["Community"] = df["Community"].astype(str)
 df["Species_ID"] = pd.to_numeric(df["Species_ID"], errors="coerce")

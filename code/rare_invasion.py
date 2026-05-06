@@ -6,7 +6,7 @@ import param
 
 # Random seed and simulation parameters
 BASE_SEED = 50
-N_SIMULATIONS = 10
+N_SIMULATIONS = 100
 
 # Exported file names
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")

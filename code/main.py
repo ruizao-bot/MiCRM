@@ -7,7 +7,7 @@ import param
 
 # Random seed and simulation parameters
 BASE_SEED = 37
-N_SIMULATIONS = 20
+N_SIMULATIONS = 100
 
 # Exported file names
 COAL_FILE = "data/coal_rho2.csv"

@@ -28,7 +28,7 @@ import param
 
 # ─── Simulation parameters ────────────────────────────────────────────────────
 BASE_SEED     = 37
-N_SIMULATIONS = 500          # total seeds across all tasks
+N_SIMULATIONS = 100          # total seeds across all tasks
 
 # ─── Output ───────────────────────────────────────────────────────────────────
 # Use env variable PROJECT_DIR if set (PBS copies script to spool, __file__ is unreliable)
@@ -57,7 +57,7 @@ T_SPAN           = (0, 100000)
 C0_VALUE           = 0.01
 R0_VALUE           = 1.0
 SURVIVAL_THRESHOLD = 1e-5
-EV_THRESHOLD       = 0.00
+EV_THRESHOLD       = 0.01
 
 INTE_CUE_N_SAVE_POINTS = 40
 
@@ -490,29 +490,24 @@ def simulate(seed):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--task-id",  type=int, default=0,
-                        help="SLURM_ARRAY_TASK_ID (0-based)")
-    parser.add_argument("--n-tasks",  type=int, default=1,
-                        help="Total number of array tasks")
     parser.add_argument("--n-cores",  type=int, default=None,
-                        help="CPU cores per task (default: all available)")
+                        help="CPU cores (default: all available)")
     args = parser.parse_args()
 
     rng_master = np.random.default_rng(BASE_SEED)
     all_seeds  = rng_master.integers(0, 2**32 - 1, size=N_SIMULATIONS, dtype=np.uint32).tolist()
-    task_seeds = all_seeds[args.task_id::args.n_tasks]
 
     n_cores = args.n_cores or os.cpu_count()
-    print(f"Task {args.task_id}/{args.n_tasks}: {len(task_seeds)} seeds, {n_cores} cores", flush=True)
+    print(f"Running {len(all_seeds)} seeds on {n_cores} cores", flush=True)
 
     with Pool(n_cores) as pool:
-        results = pool.map(simulate, task_seeds)
+        results = pool.map(simulate, all_seeds)
 
     rows = [row for result in results if result for row in result]
     df   = pd.DataFrame(rows)
 
     os.makedirs(OUT_DIR, exist_ok=True)
-    out_file = os.path.join(OUT_DIR, f"coal_task{args.task_id:04d}.csv")
+    out_file = os.path.join(OUT_DIR, "coal_task0000.csv")
     df.to_csv(out_file, index=False)
     print(f"Saved {len(df)} rows → {out_file}", flush=True)
 
