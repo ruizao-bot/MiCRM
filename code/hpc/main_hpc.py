@@ -136,6 +136,14 @@ def compute_actual_community_cue(u, l, sol, N, m, C0, survivor_idx=None):
     return np.nan if np.abs(tot_up) < 1e-12 else tot_an / tot_up
 
 
+def compute_community_cue_eflux(species_cue, C_final, Ui0, survivor_idx):
+    idx = np.asarray(survivor_idx, dtype=int)
+    if idx.size == 0:
+        return np.nan
+    weights = C_final[idx] * Ui0[idx]
+    return param.safe_weighted_average(species_cue[idx], weights)
+
+
 def cue_abundance_theory(eps, eps_c, H, Cmax):
     eps = np.asarray(eps, dtype=float)
     if not np.isfinite(eps_c) or not np.isfinite(H) or not np.isfinite(Cmax):
@@ -350,9 +358,9 @@ def simulate(seed):
     C_final3 = np.maximum(sol3.y[:N3, -1], 0.0)
     R_final3 = np.maximum(sol3.y[N3:, -1], 0.0)
 
-    _, _, _, species_CUE1 = compute_Gi0_Ui0_eps(u1, l1, R0_1, MAINTENANCE_COST)
-    _, _, _, species_CUE2 = compute_Gi0_Ui0_eps(u2, l2, R0_2, MAINTENANCE_COST)
-    _, _, _, species_CUE3 = compute_Gi0_Ui0_eps(u3, l3, R0_3, MAINTENANCE_COST)
+    _, _, Ui0_1, species_CUE1 = compute_Gi0_Ui0_eps(u1, l1, R0_1, MAINTENANCE_COST)
+    _, _, Ui0_2, species_CUE2 = compute_Gi0_Ui0_eps(u2, l2, R0_2, MAINTENANCE_COST)
+    _, _, Ui0_3, species_CUE3 = compute_Gi0_Ui0_eps(u3, l3, R0_3, MAINTENANCE_COST)
 
     survivors1_t = np.where(C_final1 > SURVIVAL_THRESHOLD)[0]
     survivors2_t = np.where(C_final2 > SURVIVAL_THRESHOLD)[0]
@@ -365,9 +373,9 @@ def simulate(seed):
     actual_community_CUE2 = compute_actual_community_cue(u2, l2, sol2, N2, MAINTENANCE_COST, C0_2, survivor_idx=survivors2_t)
     actual_community_CUE3 = compute_actual_community_cue(u3, l3, sol3, N3, MAINTENANCE_COST, C0_3, survivor_idx=survivors3_t)
 
-    community_CUE1     = param.safe_weighted_average(species_CUE1[survivors1_t], C_final1[survivors1_t])
-    community_CUE2     = param.safe_weighted_average(species_CUE2[survivors2_t], C_final2[survivors2_t])
-    community_CUE3     = param.safe_weighted_average(species_CUE3[survivors3_t], C_final3[survivors3_t])
+    community_CUE1     = compute_community_cue_eflux(species_CUE1, C_final1, Ui0_1, survivors1_t)
+    community_CUE2     = compute_community_cue_eflux(species_CUE2, C_final2, Ui0_2, survivors2_t)
+    community_CUE3     = compute_community_cue_eflux(species_CUE3, C_final3, Ui0_3, survivors3_t)
     community_CUE1_surv = community_CUE1
     community_CUE2_surv = community_CUE2
     community_CUE3_surv = community_CUE3
@@ -376,9 +384,9 @@ def simulate(seed):
     facilitation2 = np.mean(param.calculate_effective_leakage(u2, l2), axis=1)
     facilitation3 = np.mean(param.calculate_effective_leakage(u3, l3), axis=1)
 
-    competition_comm1   = param.community_level_competition(u1)
-    competition_comm2   = param.community_level_competition(u2)
-    competition_comm3   = param.community_level_competition(u3)
+    competition_comm1   = param.community_level_competition(u1, C_final1, Ui0_1, survivors1_t)
+    competition_comm2   = param.community_level_competition(u2, C_final2, Ui0_2, survivors2_t)
+    competition_comm3   = param.community_level_competition(u3, C_final3, Ui0_3, survivors3_t)
     competition_species1 = param.species_level_competition(u1)
     competition_species2 = param.species_level_competition(u2)
     competition_species3 = param.species_level_competition(u3)

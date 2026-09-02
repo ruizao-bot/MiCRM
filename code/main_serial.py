@@ -45,7 +45,7 @@ MAINTENANCE_COST  = 0.2
 T_CYCLE           = 24.0      # duration of one growth cycle (same time units as main.py)
 DILUTION_FACTOR   = 0.01      # fraction transferred each cycle (100× dilution)
 R_FEED_VALUE      = 1.0       # resource concentration in fresh medium
-N_CYCLES_MAX      = 1000      # safety cap on number of cycles
+N_CYCLES_MAX      = 100       # safety cap on number of cycles
 CONVERGENCE_TOL   = 1e-3      # relative L2 change in C between cycles to declare steady-state
 N_CHECK_CYCLES    = 5         # number of consecutive converged cycles required
 
@@ -244,6 +244,15 @@ def compute_actual_community_cue_cycle(u, l, sol, N, m, survivor_idx=None):
     return total_anab / total_uptake
 
 
+def compute_community_cue_eflux(species_cue, C_final, u, R0, survivor_idx):
+    idx = np.asarray(survivor_idx, dtype=int)
+    if idx.size == 0:
+        return np.nan
+    Ui0 = np.sum(u * R0[None, :], axis=1)
+    weights = C_final[idx] * Ui0[idx]
+    return param.safe_weighted_average(species_cue[idx], weights)
+
+
 # =============================================================================
 # Per-seed simulation
 # =============================================================================
@@ -335,14 +344,14 @@ def simulate(seed):
         u3, l3, last_sol3, N3, MAINTENANCE_COST, survivor_idx=surv3
     )
 
-    community_CUE1 = param.safe_weighted_average(species_CUE1[surv1], C_final1[surv1])
-    community_CUE2 = param.safe_weighted_average(species_CUE2[surv2], C_final2[surv2])
-    community_CUE3 = param.safe_weighted_average(species_CUE3[surv3], C_final3[surv3])
+    community_CUE1 = compute_community_cue_eflux(species_CUE1, C_final1, u1, R0_1, surv1)
+    community_CUE2 = compute_community_cue_eflux(species_CUE2, C_final2, u2, R0_2, surv2)
+    community_CUE3 = compute_community_cue_eflux(species_CUE3, C_final3, u3, R0_3, surv3)
 
     # ── Other community metrics ────────────────────────────────────────────────
-    competition1 = param.community_level_competition(u1)
-    competition2 = param.community_level_competition(u2)
-    competition3 = param.community_level_competition(u3)
+    competition1 = param.community_level_competition(u1, C_final1, np.sum(u1 * R0_1[None, :], axis=1), surv1)
+    competition2 = param.community_level_competition(u2, C_final2, np.sum(u2 * R0_2[None, :], axis=1), surv2)
+    competition3 = param.community_level_competition(u3, C_final3, np.sum(u3 * R0_3[None, :], axis=1), surv3)
 
     comp_sp1 = param.species_level_competition(u1)
     comp_sp2 = param.species_level_competition(u2)

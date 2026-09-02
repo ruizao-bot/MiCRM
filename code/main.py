@@ -7,7 +7,7 @@ import param
 
 # Random seed and simulation parameters
 BASE_SEED = 37
-N_SIMULATIONS = 100
+N_SIMULATIONS = 50
 
 # Exported file names
 COAL_FILE = "data/coal_rho2.csv"
@@ -59,6 +59,14 @@ def _ensure_m_vec(m, N):
     m_vec = np.asarray(m, dtype=float)
     assert m_vec.shape[0] == N
     return m_vec
+
+
+def _finite_median(values):
+    arr = np.asarray(values, dtype=float)
+    arr = arr[np.isfinite(arr)]
+    if arr.size == 0:
+        return np.nan
+    return float(np.median(arr))
 
 
 def compute_Gi0_Ui0_eps(u, l, R0, m):
@@ -136,6 +144,14 @@ def compute_actual_community_cue(u, l, sol, N, m, C0, survivor_idx=None):
     if np.abs(total_uptake) < 1e-12:
         return np.nan
     return total_anab / total_uptake
+
+
+def compute_community_cue_eflux(species_cue, C_final, Ui0, survivor_idx):
+    idx = np.asarray(survivor_idx, dtype=int)
+    if idx.size == 0:
+        return np.nan
+    weights = C_final[idx] * Ui0[idx]
+    return param.safe_weighted_average(species_cue[idx], weights)
  
 
 # =============================================================================
@@ -261,10 +277,10 @@ def estimate_theory_params_mechanistic(df_comm, survival_threshold=1e-5):
             NearThresholdUsed=("Theory_NearThresholdUsed_seed", "first")
         )
     )
-    eps_c = np.nanmedian(seed_params["eps_c"])
-    chi_bar = np.nanmedian(seed_params["chi_bar"])
-    U_bar = np.nanmedian(seed_params["U_bar"])
-    Cmax = np.nanmedian(seed_params["Cmax"])
+    eps_c = _finite_median(seed_params["eps_c"])
+    chi_bar = _finite_median(seed_params["chi_bar"])
+    U_bar = _finite_median(seed_params["U_bar"])
+    Cmax = _finite_median(seed_params["Cmax"])
     if not all(np.isfinite(v) and v > 0 for v in [chi_bar, U_bar, Cmax]):
         return None
     if not np.isfinite(eps_c):
@@ -376,9 +392,9 @@ def simulate(seed):
     R_final3 = np.maximum(sol3.y[N3:, -1], 0.0)
 
     # Per-species CUE (using eta from l tensor for mechanistic consistency)
-    _, _, _, species_CUE1 = compute_Gi0_Ui0_eps(u1, l1, R0_1, MAINTENANCE_COST)
-    _, _, _, species_CUE2 = compute_Gi0_Ui0_eps(u2, l2, R0_2, MAINTENANCE_COST)
-    _, _, _, species_CUE3 = compute_Gi0_Ui0_eps(u3, l3, R0_3, MAINTENANCE_COST)
+    _, _, Ui0_1, species_CUE1 = compute_Gi0_Ui0_eps(u1, l1, R0_1, MAINTENANCE_COST)
+    _, _, Ui0_2, species_CUE2 = compute_Gi0_Ui0_eps(u2, l2, R0_2, MAINTENANCE_COST)
+    _, _, Ui0_3, species_CUE3 = compute_Gi0_Ui0_eps(u3, l3, R0_3, MAINTENANCE_COST)
     survivors1_t = np.where(C_final1 > SURVIVAL_THRESHOLD)[0]
     survivors2_t = np.where(C_final2 > SURVIVAL_THRESHOLD)[0]
     survivors3_t = np.where(C_final3 > SURVIVAL_THRESHOLD)[0]
@@ -401,13 +417,13 @@ def simulate(seed):
     survivors2_count = len(survivors2_t)
     survivors3_count = len(survivors3_t)
 
-    # Community CUE is computed on surviving species only.
-    community_CUE1 = param.safe_weighted_average(species_CUE1[survivors1_t], C_final1[survivors1_t])
-    community_CUE2 = param.safe_weighted_average(species_CUE2[survivors2_t], C_final2[survivors2_t])
-    community_CUE3 = param.safe_weighted_average(species_CUE3[survivors3_t], C_final3[survivors3_t])
-    community_CUE1_surv = param.safe_weighted_average(species_CUE1[survivors1_t], C_final1[survivors1_t])
-    community_CUE2_surv = param.safe_weighted_average(species_CUE2[survivors2_t], C_final2[survivors2_t])
-    community_CUE3_surv = param.safe_weighted_average(species_CUE3[survivors3_t], C_final3[survivors3_t])
+    # Community CUE uses Eflux weights: C_i* U_i^0.
+    community_CUE1 = compute_community_cue_eflux(species_CUE1, C_final1, Ui0_1, survivors1_t)
+    community_CUE2 = compute_community_cue_eflux(species_CUE2, C_final2, Ui0_2, survivors2_t)
+    community_CUE3 = compute_community_cue_eflux(species_CUE3, C_final3, Ui0_3, survivors3_t)
+    community_CUE1_surv = compute_community_cue_eflux(species_CUE1, C_final1, Ui0_1, survivors1_t)
+    community_CUE2_surv = compute_community_cue_eflux(species_CUE2, C_final2, Ui0_2, survivors2_t)
+    community_CUE3_surv = compute_community_cue_eflux(species_CUE3, C_final3, Ui0_3, survivors3_t)
 
     L_eff1 = param.calculate_effective_leakage(u1, l1)
     L_eff2 = param.calculate_effective_leakage(u2, l2)
@@ -417,9 +433,9 @@ def simulate(seed):
     facilitation2 = np.mean(L_eff2, axis=1)
     facilitation3 = np.mean(L_eff3, axis=1)
 
-    competition_comm1 = param.community_level_competition(u1)
-    competition_comm2 = param.community_level_competition(u2)
-    competition_comm3 = param.community_level_competition(u3)
+    competition_comm1 = param.community_level_competition(u1, C_final1, Ui0_1, survivors1_t)
+    competition_comm2 = param.community_level_competition(u2, C_final2, Ui0_2, survivors2_t)
+    competition_comm3 = param.community_level_competition(u3, C_final3, Ui0_3, survivors3_t)
 
     competition_species1 = param.species_level_competition(u1)
     competition_species2 = param.species_level_competition(u2)

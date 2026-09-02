@@ -44,6 +44,16 @@ SURVIVAL_THRESHOLD = 1e-5
 OVERLAP_RATIOS = [0.25, 0.5, 0.75]
 
 
+def compute_community_cue_eflux(species_cue, C_final, u, R0, survivor_idx):
+    """Community CUE with Eflux weights: C_i* * U_i^0 over survivors."""
+    idx = np.asarray(survivor_idx, dtype=int)
+    if idx.size == 0:
+        return np.nan
+    Ui0 = np.sum(u * R0[None, :], axis=1)
+    weights = C_final[idx] * Ui0[idx]
+    return param.safe_weighted_average(species_cue[idx], weights)
+
+
 def simulate_overlap(args):
     """Simulate community coalescence with specified resource overlap ratio."""
     seed, overlap_ratio = args
@@ -137,15 +147,15 @@ def simulate_overlap(args):
     survivors2 = np.where(C_final2 > SURVIVAL_THRESHOLD)[0]
     survivors3 = np.where(C_final3 > SURVIVAL_THRESHOLD)[0]
     
-    # Community CUE (survivors only)
-    community_CUE1 = param.safe_weighted_average(species_CUE1[survivors1], C_final1[survivors1])
-    community_CUE2 = param.safe_weighted_average(species_CUE2[survivors2], C_final2[survivors2])
-    community_CUE3 = param.safe_weighted_average(species_CUE3[survivors3], C_final3[survivors3])
+    # Community CUE (survivors only), Eflux-weighted: C_i* * U_i^0
+    community_CUE1 = compute_community_cue_eflux(species_CUE1, C_final1, u1, R0_1, survivors1)
+    community_CUE2 = compute_community_cue_eflux(species_CUE2, C_final2, u2, R0_2, survivors2)
+    community_CUE3 = compute_community_cue_eflux(species_CUE3, C_final3, u3, R0_3, survivors3)
     
     # Competition metrics
-    competition_comm1 = param.community_level_competition(u1)
-    competition_comm2 = param.community_level_competition(u2)
-    competition_comm3 = param.community_level_competition(u3)
+    competition_comm1 = param.community_level_competition(u1, C_final1, np.sum(u1 * R0_1[None, :], axis=1), survivors1)
+    competition_comm2 = param.community_level_competition(u2, C_final2, np.sum(u2 * R0_2[None, :], axis=1), survivors2)
+    competition_comm3 = param.community_level_competition(u3, C_final3, np.sum(u3 * R0_3[None, :], axis=1), survivors3)
     
     # Facilitation metrics
     L_eff1 = param.calculate_effective_leakage(u1, l1)
@@ -220,8 +230,15 @@ def _proxy_cue_diff(args):
     rng = np.random.default_rng(seed)
 
     u_pool = param.modular_uptake(N_POOL, M_POOL, N_MODULES, S_RATIO, rng)
-    # Must call generate_l_tensor to keep rng state in sync with simulate_overlap
-    param.generate_l_tensor(N_POOL, M_POOL, N_MODULES, S_RATIO, LEAKAGE_RATE, u_pool, rng)
+    # Keep the RNG state in sync with simulate_overlap without allocating the
+    # 1000 x 100 x 100 leakage tensor.  With one module, generate_l_tensor()
+    # consumes exactly N_POOL * M_POOL * M_POOL uniform draws and no others.
+    if N_MODULES == 1:
+        rng.bit_generator.advance(N_POOL * M_POOL * M_POOL)
+    else:
+        param.generate_l_tensor(
+            N_POOL, M_POOL, N_MODULES, S_RATIO, LEAKAGE_RATE, u_pool, rng
+        )
 
     overlap_n = int(M1 * overlap_ratio)
     unique_n = M1 - overlap_n

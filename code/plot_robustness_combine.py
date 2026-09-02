@@ -186,8 +186,6 @@ ax_a.set_xlabel("Community CUE difference")
 ax_a.set_ylabel("Similarity difference")
 ax_a.legend(title="Dominant community", loc="lower right",
             frameon=True, edgecolor="black", framealpha=0.6)
-ax_a.text(0.04, 0.97, "A", transform=ax_a.transAxes,
-          fontsize=15, fontweight="bold", va="top", ha="left")
 style_ax(ax_a)
 
 # ── Panel B ───────────────────────────────────────────────────────────────────
@@ -205,9 +203,11 @@ ax_b.set_ylim(0, 105)
 ax_b.set_yticks([0, 20, 40, 60, 80, 100])
 for xi, acc, hi in zip(x, accs, err_hi):
     ax_b.text(xi, (acc + hi) * 100 + 1, f"{acc:.0%}", ha="center", va="bottom", fontsize=12)
-ax_b.text(0.04, 0.97, "B", transform=ax_b.transAxes,
-          fontsize=15, fontweight="bold", va="top", ha="left")
 style_ax(ax_b, linewidth=0.8)
+
+# 在图框外添加 (A) (B) 标注（不加粗，仅括号）
+fig.text(0.01, 0.98, '(A)', ha='left', va='top', fontsize=15)
+fig.text(0.51, 0.98, '(B)', ha='left', va='top', fontsize=15)
 
 plt.tight_layout()
 plt.savefig("figure/robustness_combine.pdf", bbox_inches="tight")

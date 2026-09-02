@@ -165,67 +165,6 @@ def simulate(seed):
     return rows
 
 
-def plot(df, out_path):
-    import matplotlib.pyplot as plt
-    import matplotlib as mpl
-    mpl.rcParams.update({
-        "font.family":        "serif",
-        "font.serif":         ["Times New Roman", "Times", "Nimbus Roman", "Liberation Serif"],
-        "mathtext.fontset":   "custom",
-        "mathtext.rm":        "Times New Roman",
-        "mathtext.it":        "Times New Roman:italic",
-        "mathtext.bf":        "Times New Roman:bold",
-        "font.size":          12,
-        "axes.labelsize":     12,
-        "axes.titlesize":     12,
-        "xtick.labelsize":    12,
-        "ytick.labelsize":    12,
-        "axes.linewidth":     0.4,
-        "xtick.major.width":  0.4,
-        "ytick.major.width":  0.4,
-        "xtick.major.size":   4.5,
-        "ytick.major.size":   4.5,
-        "legend.frameon":     False,
-        "pdf.fonttype":       42,
-        "ps.fonttype":        42,
-    })
-
-    df_plot = df.dropna(subset=["growth_CUE", "intrinsic_CUE"]).copy()
-
-    fig, ax = plt.subplots(figsize=(5, 3.5))
-    ax.scatter(
-        df_plot["intrinsic_CUE"], df_plot["growth_CUE"],
-        s=30, alpha=0.5,
-        facecolors="#9FB7CC", edgecolors="black", linewidths=0.4,
-        zorder=3,
-    )
-
-    # style_ax equivalent
-    ax.set_facecolor("white")
-    for spine in ax.spines.values():
-        spine.set_visible(True)
-        spine.set_color("black")
-        spine.set_linewidth(0.4)
-    ax.tick_params(axis="both", width=0.4, colors="black", pad=4)
-    ax.grid(False)
-
-    x_lo = df_plot["intrinsic_CUE"].min() - 0.03
-    x_hi = df_plot["intrinsic_CUE"].max() + 0.03
-    y_lo = df_plot["growth_CUE"].min()     - 0.03
-    y_hi = df_plot["growth_CUE"].max()     + 0.03
-    ax.set_xlim(x_lo, x_hi)
-    ax.set_ylim(y_lo, y_hi)
-
-    ax.set_xlabel("Intrinsic CUE", labelpad=6)
-    ax.set_ylabel("Growth CUE", labelpad=8)
-    ax.set_title("", pad=10)
-
-    fig.tight_layout()
-    fig.savefig(out_path, bbox_inches="tight", dpi=200)
-    plt.close(fig)
-    print(f"Figure saved → {out_path}")
-
-
 if __name__ == "__main__":
     seeds = [BASE_SEED + i for i in range(N_SIMULATIONS)]
 
@@ -242,9 +181,5 @@ if __name__ == "__main__":
     df.to_csv(out_csv, index=False)
     print(f"Results saved → {out_csv}")
     print(df[["intrinsic_CUE", "rmax", "growth_CUE"]].describe().round(4))
-
-    out_fig = os.path.join(os.path.dirname(__file__), "../figure/rmax_cue.pdf")
-    os.makedirs(os.path.dirname(out_fig), exist_ok=True)
-    plot(df, out_fig)
 
 

@@ -196,11 +196,27 @@ def calculate_community_feedback(L_eff, u):
     """
     return np.mean(np.sum(L_eff, axis=1))
 
-def community_level_competition(u):
-    """calculate community-level competition based on average cosine similarity between species' uptake vectors"""
+def community_level_competition(u, C_final=None, Ui0=None, survivor_idx=None):
+    """Calculate community competition.
+
+    If biomass and uptake flux are provided, return the flux-weighted average of
+    species-level competition using weights C_i * U_i^0 over the selected species.
+    Otherwise, fall back to the unweighted average pairwise cosine similarity.
+    """
     N, _ = u.shape
     if N < 2:
         return np.nan
+
+    if C_final is not None and Ui0 is not None:
+        species_comp = species_level_competition(u)
+        if survivor_idx is None:
+            idx = np.arange(N)
+        else:
+            idx = np.asarray(survivor_idx, dtype=int)
+        if idx.size == 0:
+            return np.nan
+        weights = np.asarray(C_final, dtype=float)[idx] * np.asarray(Ui0, dtype=float)[idx]
+        return safe_weighted_average(species_comp[idx], weights)
 
     norms = np.linalg.norm(u, axis=1, keepdims=True)
     u_normalized = u / (norms + 1e-10)
@@ -239,6 +255,184 @@ def species_level_competition_dot(u):
     np.fill_diagonal(comp_matrix, 0.0)
     comp = np.sum(comp_matrix, axis=1) / (N - 1)
     return comp
+
+
+def macarthur_competition_matrix(u, resource_exploitability=None):
+    """Return MacArthur's relative Lotka-Volterra competition coefficients.
+
+    This implements table 2C of Sakarchi & Germain (2025):
+
+        alpha_ij = sum_k(u_ik * u_jk * q_k) / sum_k(u_ik**2 * q_k),
+
+    where ``q_k = w_k K_k / r_k`` is resource exploitability.  For the
+    externally supplied resources used by this MiCRM, ``w_k`` is one and the
+    analogous quantity is ``q_k = (rho_k / omega_k) / omega_k``.  Passing no
+    exploitability weights is appropriate when all resources have identical
+    supply and turnover parameters.
+
+    Rows are normalized by intraspecific competition, so alpha_ii is one and
+    alpha_ij is directional (it need not equal alpha_ji).
+    """
+    uptake = np.asarray(u, dtype=float)
+    if uptake.ndim != 2:
+        raise ValueError("u must be a two-dimensional species-by-resource matrix")
+
+    n_resources = uptake.shape[1]
+    if resource_exploitability is None:
+        q = np.ones(n_resources, dtype=float)
+    else:
+        q = np.asarray(resource_exploitability, dtype=float)
+        if q.shape != (n_resources,):
+            raise ValueError("resource_exploitability must have one value per resource")
+        if np.any(~np.isfinite(q)) or np.any(q < 0):
+            raise ValueError("resource_exploitability must be finite and non-negative")
+
+    weighted_overlap = (uptake * q[None, :]) @ uptake.T
+    self_competition = np.diag(weighted_overlap)
+    alpha = np.divide(
+        weighted_overlap,
+        self_competition[:, None],
+        out=np.full_like(weighted_overlap, np.nan, dtype=float),
+        where=self_competition[:, None] > 0,
+    )
+    return alpha
+
+
+def community_level_competition_macarthur(
+    u,
+    C_final,
+    Ui0=None,
+    survivor_idx=None,
+    resource_exploitability=None,
+):
+    """Aggregate MacArthur alpha_ij to one community-level competition value.
+
+    The paper defines pairwise ``alpha_ij`` but not a unique community scalar.
+    Here, each focal and competitor species is weighted by its equilibrium
+    energy flux, ``C_i * U_i^0``.  The diagonal is excluded.  The result is the
+    flux-weighted mean relative interspecific competition among ordered pairs.
+    """
+    uptake = np.asarray(u, dtype=float)
+    abundance = np.asarray(C_final, dtype=float)
+    if uptake.ndim != 2 or abundance.shape != (uptake.shape[0],):
+        raise ValueError("C_final must have one value per row of u")
+
+    if survivor_idx is None:
+        idx = np.flatnonzero(abundance > 0)
+    else:
+        idx = np.asarray(survivor_idx, dtype=int)
+    if idx.size < 2:
+        return np.nan
+
+    uptake_s = uptake[idx]
+    abundance_s = abundance[idx]
+    alpha = macarthur_competition_matrix(uptake_s, resource_exploitability)
+
+    if Ui0 is None:
+        flux = abundance_s
+    else:
+        uptake_flux = np.asarray(Ui0, dtype=float)
+        if uptake_flux.shape != (uptake.shape[0],):
+            raise ValueError("Ui0 must have one value per row of u")
+        flux = abundance_s * uptake_flux[idx]
+
+    pair_weights = flux[:, None] * flux[None, :]
+    np.fill_diagonal(pair_weights, 0.0)
+    valid = np.isfinite(alpha) & (pair_weights > 0)
+    denominator = np.sum(pair_weights[valid])
+    if denominator <= 0:
+        return np.nan
+    return float(np.sum(alpha[valid] * pair_weights[valid]) / denominator)
+
+
+def micrm_depletion_competition_matrix(
+    C_hat,
+    R_hat,
+    u,
+    l_tensor,
+    omega,
+    lambda_vec,
+):
+    """Return the positive direct-depletion coefficients A_dep_ij.
+
+    The MiCRM resource response is split into the negative forcing caused by
+    consumer j's uptake and the positive forcing caused by its leakage.  This
+    function retains only the former.  ``A_dep[i, j]`` is therefore the amount
+    by which one unit of species j lowers species i's per-capita growth rate
+    through resource depletion, after the resident resource-feedback network
+    has relaxed locally.
+    """
+    abundance = np.asarray(C_hat, dtype=float)
+    resources = np.asarray(R_hat, dtype=float)
+    uptake = np.asarray(u, dtype=float)
+    leakage = np.asarray(l_tensor, dtype=float)
+    turnover = np.asarray(omega, dtype=float)
+    retention = 1.0 - np.asarray(lambda_vec, dtype=float)
+
+    n_species, n_resources = uptake.shape
+    if abundance.shape != (n_species,) or resources.shape != (n_resources,):
+        raise ValueError("C_hat and R_hat must match the dimensions of u")
+    if leakage.shape != (n_species, n_resources, n_resources):
+        raise ValueError("l_tensor must have shape (species, resources, resources)")
+    if turnover.ndim == 0:
+        turnover = np.full(n_resources, float(turnover))
+    if turnover.shape != (n_resources,):
+        raise ValueError("omega must be scalar or have one value per resource")
+    if retention.ndim == 0:
+        retention = np.full(n_species, float(retention))
+    if retention.shape != (n_species,):
+        raise ValueError("lambda_vec must be scalar or have one value per species")
+
+    consumer_uptake = abundance[:, None] * uptake
+    # L[a, b] is flux from consumed resource a into leaked resource b.
+    leakage_flux = np.einsum("ia,iab->ab", consumer_uptake, leakage, optimize=True)
+    resource_loss = turnover + np.sum(consumer_uptake, axis=0)
+    resource_jacobian_loss = np.diag(resource_loss) - leakage_flux.T
+
+    # Positive resource loss caused by adding each competitor j.
+    depletion_forcing = (uptake * resources[None, :]).T
+    resource_response = np.linalg.solve(resource_jacobian_loss, depletion_forcing)
+    retained_uptake = retention[:, None] * uptake
+    return retained_uptake @ resource_response
+
+
+def community_heterospecific_competition_pressure(
+    depletion_competition,
+    C_final,
+    survivor_idx=None,
+):
+    """Compute abundance-weighted heterospecific growth suppression.
+
+    For each focal species i,
+
+        P_i_inter = sum_(j != i) A_dep_ij C_j*.
+
+    The community metric is
+
+        sum_i C_i* P_i_inter / sum_i C_i*.
+
+    Only selected species contribute as focal species or competitors, and the
+    intraspecific diagonal is explicitly excluded.
+    """
+    matrix = np.asarray(depletion_competition, dtype=float)
+    abundance = np.asarray(C_final, dtype=float)
+    if matrix.shape != (abundance.size, abundance.size):
+        raise ValueError("depletion_competition must be square and match C_final")
+    if survivor_idx is None:
+        idx = np.flatnonzero(abundance > 0)
+    else:
+        idx = np.asarray(survivor_idx, dtype=int)
+    if idx.size < 2:
+        return np.nan
+
+    submatrix = matrix[np.ix_(idx, idx)].copy()
+    np.fill_diagonal(submatrix, 0.0)
+    focal_abundance = abundance[idx]
+    total_abundance = np.sum(focal_abundance)
+    if total_abundance <= 0:
+        return np.nan
+    pressure_by_species = submatrix @ focal_abundance
+    return float(np.dot(focal_abundance, pressure_by_species) / total_abundance)
 
 
 def compute_uptake_variance(u):

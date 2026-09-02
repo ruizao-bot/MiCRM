@@ -183,6 +183,15 @@ def compute_actual_community_cue_cycle(u, l, sol, N, m, survivor_idx=None):
     return np.nan if np.abs(tot_up) < 1e-12 else tot_an / tot_up
 
 
+def compute_community_cue_eflux(species_cue, C_final, u, R0, survivor_idx):
+    idx = np.asarray(survivor_idx, dtype=int)
+    if idx.size == 0:
+        return np.nan
+    Ui0 = np.sum(u * R0[None, :], axis=1)
+    weights = C_final[idx] * Ui0[idx]
+    return param.safe_weighted_average(species_cue[idx], weights)
+
+
 # =============================================================================
 # Per-seed simulation
 # =============================================================================
@@ -241,13 +250,13 @@ def simulate(seed):
     act_comm2 = compute_actual_community_cue_cycle(u2, l2, sol2, N2, MAINTENANCE_COST, surv2)
     act_comm3 = compute_actual_community_cue_cycle(u3, l3, sol3, N3, MAINTENANCE_COST, surv3)
 
-    comm_cue1 = param.safe_weighted_average(sp_cue1[surv1], C_final1[surv1])
-    comm_cue2 = param.safe_weighted_average(sp_cue2[surv2], C_final2[surv2])
-    comm_cue3 = param.safe_weighted_average(sp_cue3[surv3], C_final3[surv3])
+    comm_cue1 = compute_community_cue_eflux(sp_cue1, C_final1, u1, R0_1, surv1)
+    comm_cue2 = compute_community_cue_eflux(sp_cue2, C_final2, u2, R0_2, surv2)
+    comm_cue3 = compute_community_cue_eflux(sp_cue3, C_final3, u3, R0_3, surv3)
 
-    comp1 = param.community_level_competition(u1)
-    comp2 = param.community_level_competition(u2)
-    comp3 = param.community_level_competition(u3)
+    comp1 = param.community_level_competition(u1, C_final1, np.sum(u1 * R0_1[None, :], axis=1), surv1)
+    comp2 = param.community_level_competition(u2, C_final2, np.sum(u2 * R0_2[None, :], axis=1), surv2)
+    comp3 = param.community_level_competition(u3, C_final3, np.sum(u3 * R0_3[None, :], axis=1), surv3)
 
     comp_sp1 = param.species_level_competition(u1)
     comp_sp2 = param.species_level_competition(u2)

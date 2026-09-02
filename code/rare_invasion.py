@@ -41,6 +41,16 @@ SURVIVAL_THRESHOLD = 1e-5
 DILUTION_RATES = [0.01,0.1]
 
 
+def compute_community_cue_eflux(species_cue, C_final, u, R0, survivor_idx):
+    """Community CUE with Eflux weights: C_i* * U_i^0 over survivors."""
+    idx = np.asarray(survivor_idx, dtype=int)
+    if idx.size == 0:
+        return np.nan
+    Ui0 = np.sum(u * R0[None, :], axis=1)
+    weights = C_final[idx] * Ui0[idx]
+    return param.safe_weighted_average(species_cue[idx], weights)
+
+
 def simulate(args):
     """Simulate rare species invasion with specified dilution rate."""
     seed, dilution_rate = args
@@ -110,14 +120,14 @@ def simulate(args):
     survivors2 = np.where(C_final2 > SURVIVAL_THRESHOLD)[0]
     survivors3 = np.where(C_final3 > SURVIVAL_THRESHOLD)[0]
 
-    community_CUE1 = param.safe_weighted_average(species_CUE1[survivors1], C_final1[survivors1])
-    community_CUE2 = param.safe_weighted_average(species_CUE2[survivors2], C_final2[survivors2])
-    community_CUE3 = param.safe_weighted_average(species_CUE3[survivors3], C_final3[survivors3])
+    community_CUE1 = compute_community_cue_eflux(species_CUE1, C_final1, u1, R0_1, survivors1)
+    community_CUE2 = compute_community_cue_eflux(species_CUE2, C_final2, u2, R0_2, survivors2)
+    community_CUE3 = compute_community_cue_eflux(species_CUE3, C_final3, u3, R0_3, survivors3)
 
     # Competition metrics
-    competition_comm1 = param.community_level_competition(u1)
-    competition_comm2 = param.community_level_competition(u2)
-    competition_comm3 = param.community_level_competition(u3)
+    competition_comm1 = param.community_level_competition(u1, C_final1, np.sum(u1 * R0_1[None, :], axis=1), survivors1)
+    competition_comm2 = param.community_level_competition(u2, C_final2, np.sum(u2 * R0_2[None, :], axis=1), survivors2)
+    competition_comm3 = param.community_level_competition(u3, C_final3, np.sum(u3 * R0_3[None, :], axis=1), survivors3)
 
     competition_species1 = param.species_level_competition(u1)
     competition_species2 = param.species_level_competition(u2)

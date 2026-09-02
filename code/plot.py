@@ -7,12 +7,14 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import os
 
 from scipy.spatial.distance import pdist, squareform
 
 warnings.filterwarnings("ignore")
 
 SURVIVAL_THRESHOLD = 1e-5
+FIGURE_DIR = "figure"
 
 pal_rgb = {
     "1": "#D8A39A",
@@ -75,6 +77,11 @@ def style_ax(ax, grid=False):
 def first_unique(series):
     vals = pd.Series(series).dropna().unique()
     return vals[0] if len(vals) > 0 else np.nan
+
+
+def save_pdf(fig, filename):
+    os.makedirs(FIGURE_DIR, exist_ok=True)
+    fig.savefig(os.path.join(FIGURE_DIR, filename), bbox_inches="tight")
 
 df = pd.read_csv("data/coal_hpc.csv")
 df = df.rename(columns={"Species_Competition_Dot": "Species_Competition2"})
@@ -253,6 +260,7 @@ for i, (ax, comm) in enumerate(zip(axes, ["1", "2", "3"])):
     style_ax(ax, grid=False)
 
 plt.tight_layout()
+save_pdf(fig, "competition_vs_community_cue.pdf")
 plt.show()
 
 
@@ -303,6 +311,7 @@ for i, (ax, comm) in enumerate(zip(axes, ["1", "2", "3"])):
     style_ax(ax, grid=False)
 
 plt.tight_layout()
+save_pdf(fig, "species_competition_vs_species_cue.pdf")
 plt.show()
 
 
@@ -359,6 +368,7 @@ for i, (ax, comm) in enumerate(zip(axes, ["1", "2", "3"])):
     style_ax(ax, grid=False)
 
 plt.tight_layout()
+save_pdf(fig, "facilitation_vs_community_cue.pdf")
 plt.show()
 
 
@@ -585,7 +595,7 @@ ax2.set_xticklabels(
 style_ax(ax2, grid=False)
 
 plt.tight_layout()
-plt.savefig("figure/combine.pdf", bbox_inches="tight")
+save_pdf(fig, "combine.pdf")
 plt.show()
 
 
@@ -670,6 +680,7 @@ ax2.set_ylabel("Community-level CUE")
 style_ax(ax2, grid=False)
 
 plt.tight_layout()
+save_pdf(fig, "community_cue_vs_depletion.pdf")
 plt.show()
 
 
@@ -681,9 +692,32 @@ plt.show()
 
 df_rare["survival"] = np.where(df_rare["C_final"] > SURVIVAL_THRESHOLD, "Survived", "Extinct")
 df_rare_filt = df_rare[df_rare["DilutionRate"].isin([0.01, 0.1])].copy()
+cue_cutoff = 0.41
+cue_bin_width = 0.01
+cue_upper = 0.45
 
-n_bins = 20
-df_rare_filt["CUE_bin"] = pd.cut(df_rare_filt["CUE"], bins=n_bins)
+cue_bins = np.arange(cue_cutoff, cue_upper + 1e-12, cue_bin_width)
+if cue_bins.size < 2:
+    cue_bins = np.array([cue_cutoff, cue_cutoff + cue_bin_width])
+
+post_cut_bins = pd.IntervalIndex.from_breaks(cue_bins, closed="right")
+cutoff_label = f"<{cue_cutoff:.2f}"
+upper_label = f"{cue_upper:.2f}"
+cue_categories = [cutoff_label, *post_cut_bins[:-1], upper_label]
+df_rare_filt["CUE_bin"] = np.where(
+    df_rare_filt["CUE"] < cue_cutoff,
+    cutoff_label,
+    np.where(
+        df_rare_filt["CUE"] >= cue_upper,
+        upper_label,
+        pd.cut(df_rare_filt["CUE"], bins=cue_bins, include_lowest=False)
+    )
+)
+df_rare_filt["CUE_bin"] = pd.Categorical(
+    df_rare_filt["CUE_bin"],
+    categories=cue_categories,
+    ordered=True
+)
 
 df_rare_bar = (
     df_rare_filt
@@ -692,10 +726,15 @@ df_rare_bar = (
     .reset_index(name="count")
 )
 
-interval_order = sorted(
-    df_rare_bar["CUE_bin"].dropna().unique(),
-    key=lambda x: x.mid
+rare_total_counts = (
+    df_rare_bar
+    .groupby(["DilutionRate", "CUE_bin"], observed=False)["count"]
+    .sum()
 )
+
+present_bins = set(df_rare_bar["CUE_bin"].dropna().unique())
+interval_order = [cat for cat in cue_categories if cat in present_bins]
+tick_labels = [val if isinstance(val, str) else f"{val.left:.2f}" for val in interval_order]
 
 dilution_labels = {
     0.01: "Rarity level = 0.01",
@@ -703,13 +742,22 @@ dilution_labels = {
 }
 
 color_map = {
-    "Survived": "#A8C3A6",
-    "Extinct": "#D8A39A"
+    "Survived": "#1F77B4",
+    "Extinct": "#D62728"
 }
 
-y_low_max = 550
-y_high_min = 2200
-y_high_max = 2600
+max_total_count = float(rare_total_counts.max()) if len(rare_total_counts) else 0.0
+lower_counts = rare_total_counts[rare_total_counts < max_total_count]
+second_max_count = float(lower_counts.max()) if len(lower_counts) else max_total_count
+
+if max_total_count > 0:
+    y_low_max = max(50, int(np.ceil(second_max_count * 1.10 / 50.0) * 50))
+    y_high_min = max(y_low_max + 100, int(np.floor(max_total_count * 0.95 / 50.0) * 50))
+    y_high_max = max(y_high_min + 100, int(np.ceil(max_total_count * 1.05 / 50.0) * 50))
+else:
+    y_low_max = 550
+    y_high_min = 2200
+    y_high_max = 2600
 
 fig = plt.figure(figsize=(12, 5.8))
 gs = fig.add_gridspec(
@@ -747,26 +795,9 @@ for i, dil in enumerate([0.01, 0.1]):
     )
 
     counts = pivot.reindex(columns=["Extinct", "Survived"], fill_value=0)
-    extinct = counts["Extinct"].to_numpy()
-    survived = counts["Survived"].to_numpy()
-
-    surv_mask = survived > 0
-    first_surv_idx = int(np.argmax(np.r_[surv_mask, True]))
-
-    plot_extinct_full = np.concatenate(([extinct[:first_surv_idx].sum()], extinct[first_surv_idx:]))
-    plot_survived_full = np.concatenate(([0.0], survived[first_surv_idx:]))
-
-    drop_leading = int(first_surv_idx == 0)
-    plot_extinct = plot_extinct_full[drop_leading:]
-    plot_survived = plot_survived_full[drop_leading:]
-
-    merged_label = f"< {interval_order[first_surv_idx].left:.2f}"
-    tick_labels_full = [merged_label] + [
-        f"{iv.left:.2f}" for iv in interval_order[first_surv_idx:]
-    ]
-    tick_labels = tick_labels_full[drop_leading:]
-
-    x = np.arange(len(plot_extinct))
+    plot_extinct = counts["Extinct"].to_numpy()
+    plot_survived = counts["Survived"].to_numpy()
+    x = np.arange(len(interval_order))
 
     ax_bot.bar(
         x, plot_extinct,
@@ -845,5 +876,6 @@ ax_top_left.plot((-d, +d), (-d, +d), **kwargs_top)
 
 ax_bot_left.plot((-d, +d), (1 - d, 1 + d), **kwargs_bot)
 
-plt.tight_layout()
+plt.tight_layout(rect=[0, 0.08, 1, 1])
+save_pdf(fig, "rare_species_invasion.pdf")
 plt.show()
